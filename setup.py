@@ -88,7 +88,7 @@ def install_font():
 
 def install_ui_packages():
     try:
-        subprocess.run(["pkg install polybar i3 picom -y"], shell=True, check=True)
+        subprocess.run(["apt install polybar i3 picom -y"], shell=True, check=True)
     except subprocess.CalledProcessError:
         print("failure in installing UI packages")
 
