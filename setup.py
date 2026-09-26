@@ -24,6 +24,7 @@ def main() -> int:
     install_required_apps()
     install_ui_packages()
     configure_ui_packages()
+    configure_other_packages()
     clean_up()
     
     return 0
@@ -95,6 +96,9 @@ def install_ui_packages():
 def configure_ui_packages():
     #todo
     return
+
+def configure_other_packages():
+    subprocess.run("git clone https://github.com/LazyVim/starter ~/.config/nvim", shell=True)
 
 
 
