@@ -49,13 +49,21 @@ def initialize_pkg():
     if res.returncode != 0:
         print(res.stderr.decode())
 
+    res = subprocess.run(["apt", "update", "-y"], capture_output=True)
+    if res.returncode != 0:
+        print(res.stderr.decode())
+    res = subprocess.run(["apt", "upgrade", "-y"], capture_output=True)
+    if res.returncode != 0:
+        print(res.stderr.decode())
+    
+
     subprocess.run(["pkg", "install", "curl", "wget", "jp2a","-y"]) #inconsistent but easier than spending more time on it
 
 
     return
 
 def install_required_apps():
-    res = subprocess.run(["pkg",
+    res = subprocess.run(["apt",
     "install",
     "x11-repo",
     "neofetch",
