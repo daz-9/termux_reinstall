@@ -38,7 +38,7 @@ def welcome_message():
         pass
     print(Style.BRIGHT + Fore.BLUE + "[+] Created by: meow \n")
     sleep(4)
-    print(Style.BRIGHT + Fore.BLUE + "\n[+] Instaled")
+    print(Style.BRIGHT + Fore.BLUE + "\n[+] Installed")
     sleep(3)
 
 def initialize_pkg():
@@ -67,19 +67,24 @@ def install_required_apps():
     subprocess.run("pkg install tur-repo -y", shell=True)
 
 
-    res = subprocess.run(["apt",
-    "install",
-    "neofetch",
-    "zip",
-    "git",
-    "zsh", #will be made default in the cleanup
-    "neovim",
-    "clang",
-    "make",
-    "lua",
-    "luarocks",
-    "-y"], check=True)
+    try:
+        subprocess.run(["apt",
+        "install",
+        "neofetch",
+        "zip",
+        "git",
+        "zsh", #will be made default in the cleanup
+        "neovim",
+        "clang",
+        "make",
+        "lua",
+        "luarocks",
+        "-y"], check=True)
+    except subprocess.CalledProcessError:
+        print("failure in installing required apps")
+        
     return
+
 
 def install_font():
     subprocess.run("mkdir -p ~/.termux/", shell=True)
