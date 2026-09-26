@@ -59,8 +59,6 @@ def install_required_apps():
     "install",
     "x11-repo",
     "neofetch",
-    "alacritty",
-    "firefox",
     "zip",
     "git",
     "rofi",
