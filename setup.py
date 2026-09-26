@@ -57,8 +57,10 @@ def initialize_pkg():
         print(res.stderr.decode())
     
 
-    subprocess.run(["pkg", "install", "curl", "wget", "jp2a","-y"]) #inconsistent but easier than spending more time on it
-
+    try:
+        subprocess.run(["pkg install curl wget jp2a -y"], shell=True, check=True)
+    except subprocess.CalledProcessError:
+            print("failure in installing installation apps")
 
     return
 
@@ -68,20 +70,10 @@ def install_required_apps():
 
 
     try:
-        subprocess.run(["apt",
-        "install",
-        "neofetch",
-        "zip",
-        "git",
-        "zsh", #will be made default in the cleanup
-        "neovim",
-        "clang",
-        "make",
-        "lua",
-        "luarocks",
-        "-y"], check=True)
+        subprocess.run(["apt install neofetch zip git zsh neovim clang make lua luarocks -y"], check=True, shell=True)
     except subprocess.CalledProcessError:
         print("failure in installing required apps")
+        
         
     return
 
@@ -95,12 +87,11 @@ def install_font():
 
 
 def install_ui_packages():
-    subprocess.run(["pkg",
-    "install",
-    "polybar",
-    "i3",
-    "picom",
-    "-y"], check=True)
+    try:
+        subprocess.run(["pkg install polybar i3 picom -y"], shell=True, check=True)
+    except subprocess.CalledProcessError:
+        print("failure in installing UI packages")
+
     return
 
 
