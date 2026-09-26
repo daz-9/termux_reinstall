@@ -49,7 +49,7 @@ def initialize_pkg():
     if res.returncode != 0:
         print(res.stderr.decode())
 
-    res = subprocess.run(["apt", "update", "-y"], capture_output=True)
+    res = subprocess.run(["pkg", "upgrade", "-y"], capture_output=True)
     if res.returncode != 0:
         print(res.stderr.decode())
     res = subprocess.run(["apt", "upgrade", "-y"], capture_output=True)
@@ -63,9 +63,12 @@ def initialize_pkg():
     return
 
 def install_required_apps():
-    res = subprocess.run(["apt",
+    subprocess.run("pkg install x11-repo -y", shell=True)
+    subprocess.run("pkg install tur-repo -y", shell=True)
+
+
+    res = subprocess.run(["pkg",
     "install",
-    "x11-repo",
     "neofetch",
     "zip",
     "git",
