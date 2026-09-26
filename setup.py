@@ -70,9 +70,13 @@ def install_required_apps():
 
 
     try:
-        subprocess.run(["apt install neofetch zip git zsh neovim clang make lua luarocks -y"], check=True, shell=True)
+        subprocess.run(["apt install neofetch zip git zsh neovim clang make lua55 luarocks -y"], check=True, shell=True)
     except subprocess.CalledProcessError:
-        print("failure in installing required apps")
+        print("[-] failure in installing required apps chapter 1")
+    try:
+        subprocess.run(["pkg install neofetch zip git zsh neovim clang make lua55 luarocks -y"], check=True, shell=True)
+    except subprocess.CalledProcessError:
+        print("[-] failure in installing required apps chapter 2")    
         
         
     return
@@ -89,8 +93,15 @@ def install_font():
 def install_ui_packages():
     try:
         subprocess.run(["apt install polybar i3 picom -y"], shell=True, check=True)
+    
     except subprocess.CalledProcessError:
-        print("failure in installing UI packages")
+        print("[-] failure in installing UI packages chapter 1.")
+
+    try:
+        subprocess.run(["pkg install polybar i3 picom -y"], shell=True, check=True)
+
+    except subprocess.CalledProcessError:
+        print("[-] failure in installing UI packages chapter 2.")
 
     return
 
