@@ -1,7 +1,7 @@
 from time import sleep
-from os import system as sys
 import subprocess
-import importlib
+import shutil
+import os
 
 
 def main() -> int:
@@ -10,7 +10,7 @@ def main() -> int:
 
 
 
-    subprocess.run("pip install rich colorama==0.4.6 -y", shell=True)
+    subprocess.run("pip install rich colorama==0.4.6", shell=True)
     
 
     try:
@@ -18,8 +18,7 @@ def main() -> int:
         welcome_message()
 
     except ImportError: #this hopefully works in case colorama can't be installed
-        print("{!} colorama could not be installed, skipping banner")
-    
+        print("[!] colorama could not be installed, skipping banner")    
     install_font()
     install_required_apps()
     install_ui_packages()
@@ -33,7 +32,10 @@ def main() -> int:
 def welcome_message():
     from colorama import Fore, Back, Style, init
 
-    subprocess.run("jp2a https://assets.stickpng.com/images/613098fd48f1e30004910189.png  --color ", shell=True)
+    try :
+        subprocess.run("jp2a https://assets.stickpng.com/images/613098fd48f1e30004910189.png  --color ", shell=True)
+    except subprocess.CalledProcessError:
+        pass
     print(Style.BRIGHT + Fore.BLUE + "[+] Created by: meow \n")
     sleep(4)
     print(Style.BRIGHT + Fore.BLUE + "\n[+] Instaled")
@@ -41,9 +43,11 @@ def welcome_message():
 
 def initialize_pkg():
     res = subprocess.run(["pkg", "update", "-y"], capture_output=True)
-    print(res.stdout.decode())
+    if res.returncode != 0:
+        print(res.stderr.decode())
     res = subprocess.run(["pkg", "upgrade", "-y"], capture_output=True)
-    print(res.stdout.decode())
+    if res.returncode != 0:
+        print(res.stderr.decode())
 
     subprocess.run(["pkg", "install", "curl", "wget", "jp2a","-y"]) #inconsistent but easier than spending more time on it
 
@@ -66,8 +70,8 @@ def install_required_apps():
     "make",
     "lazygit",
     "lua",
-    "luarocks"
-    "-y"], capture_output=True)
+    "luarocks",
+    "-y"], capture_output=True, check=True)
     print(res.stdout.decode())
     return
 
@@ -77,10 +81,6 @@ def install_font():
     #the font will be loaded at the end
     return
 
-def clean_up():
-    subprocess.run("termux-reload-settings", shell=True)
-    subprocess.run("chsh -s zsh", shell=True)
-
 
 
 def install_ui_packages():
@@ -89,7 +89,7 @@ def install_ui_packages():
     "polybar",
     "i3",
     "picom",
-    "-y"])
+    "-y"], check=True)
     return
 
 
@@ -98,7 +98,19 @@ def configure_ui_packages():
     return
 
 def configure_other_packages():
-    subprocess.run("git clone https://github.com/LazyVim/starter ~/.config/nvim", shell=True)
+    for p in ["~/.config/nvim", "~/.local/share/nvim", "~/.local/state/nvim", "~/.cache/nvim"]:
+        p = os.path.expanduser(p)
+        if os.path.exists(p):
+            shutil.move(p, p + ".bak") #backup config
+    subprocess.run("git clone https://github.com/LazyVim/starter ~/.config/nvim", shell=True) #nvim config
+
+
+def clean_up():
+    subprocess.run("chsh -s zsh", shell=True) #taken from the official zsh page on termux docs
+    subprocess.run("termux-reload-settings", shell=True)
+
+
+
 
 
 
