@@ -67,17 +67,15 @@ def install_required_apps():
     subprocess.run("pkg install tur-repo -y", shell=True)
 
 
-    res = subprocess.run(["pkg",
+    res = subprocess.run(["apt",
     "install",
     "neofetch",
     "zip",
     "git",
-    "rofi",
     "zsh", #will be made default in the cleanup
     "neovim",
     "clang",
     "make",
-    "lazygit",
     "lua",
     "luarocks",
     "-y"], capture_output=True, check=True)
