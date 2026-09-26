@@ -78,8 +78,7 @@ def install_required_apps():
     "make",
     "lua",
     "luarocks",
-    "-y"], capture_output=True, check=True)
-    print(res.stdout.decode())
+    "-y"], check=True)
     return
 
 def install_font():
