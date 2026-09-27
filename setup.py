@@ -59,13 +59,14 @@ def install_required_apps():
     subprocess.run("pkg install x11-repo -y", shell=True)
     subprocess.run("pkg install tur-repo -y", shell=True)
 
-
+    apps_to_be_installed = ["neofetch", "zip", "git", "zsh", "neovim", "clang", "make", "lua55", "luarocks", "alacritty"]
+    apps_to_be_installed_str = " ".join(apps_to_be_installed)
     try:
-        subprocess.run(["apt install neofetch zip git zsh neovim clang make lua55 luarocks alacritty -y"], check=True, shell=True)
+        subprocess.run(["apt install " + apps_to_be_installed_str + " -y"], check=True, shell=True)
     except subprocess.CalledProcessError:
         print("[-] failure in installing required apps chapter 1")
         try:
-            subprocess.run(["pkg install neofetch zip git zsh neovim clang make lua55 luarocks alacritty -y"], check=True, shell=True)
+            subprocess.run(["pkg install " + apps_to_be_installed_str + " -y"], check=True, shell=True)
         except subprocess.CalledProcessError:
             print("[-] failure in installing required apps chapter 2")
     
@@ -82,13 +83,16 @@ def install_font():
 
 
 def install_ui_packages():
+
+    apps_to_be_installed = ["polybar", "i3", "picom"]
+    apps_to_be_installed_str = " ".join(apps_to_be_installed)
     try:
-        subprocess.run(["apt install polybar i3 picom -y"], shell=True, check=True)
+        subprocess.run(["apt install " + apps_to_be_installed_str + " -y"], shell=True, check=True)
     
     except subprocess.CalledProcessError:
         print("[-] failure in installing UI packages chapter 1.")
         try: 
-            subprocess.run(["pkg install polybar i3 picom -y"], shell=True, check=True)
+            subprocess.run(["pkg install " + apps_to_be_installed_str + " -y"], shell=True, check=True)
         except subprocess.CalledProcessError:
             print("[-] failure in installing UI packages chapter 2.")
             

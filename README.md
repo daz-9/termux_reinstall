@@ -14,6 +14,22 @@ The zsh config is stolen from ohmyzsh
 4. polybar configuration
 5. alacritty setup in i3
 
+# Warning
+
+When nvim is enabled inside there is a big performance hit even though they are fine on their own, this might be fixed using `termux-x11-universal-sharedUid-debug.apk`, but I haven't tried it yet.
+
+# Warning
+
+Repeated launches of `start-desktop.sh` stack multiple polybars
+
+# Warning
+
+Disable the android physical keyboard shortcuts
+
+# Warning
+
+Alacritty font size is tiny, maybe i3 has a DPI setting?
+
 ## Troubleshooting
 
 If install hangs at "Waiting for headers":
