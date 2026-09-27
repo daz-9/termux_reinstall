@@ -1,4 +1,7 @@
 import subprocess
+import os
+import shutil
+
 
 def main() -> int:
     configure_zsh()
