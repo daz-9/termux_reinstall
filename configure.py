@@ -30,7 +30,14 @@ def configure_ui_packages():
     return
 
 def move_files():
-    subprocess.run("mv start-desktop.sh ~/start-desktop.sh", shell=True)
+    here = os.path.dirname(os.path.abspath(__file__))
+    src = os.path.join(here, "start-desktop.sh")
+    dst = os.path.expanduser("~/start-desktop.sh")
+    if not os.path.exists(src):
+        print("[-] start-desktop.sh not found")
+        return
+    shutil.copy(src, dst)          # copy, not move
+    os.chmod(dst, 0o755)           # ensure executable
 
 if __name__ == "__main__":
     main()

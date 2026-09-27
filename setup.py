@@ -10,7 +10,7 @@ def main() -> int:
 
 
 
-    subprocess.run("pip install rich colorama==0.4.6", shell=True)
+    subprocess.run("pip install rich colorama==0.4.6", shell=True, check=True)
     
 
     try:
@@ -40,10 +40,10 @@ def welcome_message():
     sleep(3)
 
 def initialize_pkg():
-    res = subprocess.run(["pkg", "update", "-y"], capture_output=True)
+    res = subprocess.run(["pkg", "update", "-y"], capture_output=True, check=True)
     if res.returncode != 0:
         print(res.stderr.decode())
-    res = subprocess.run(["pkg", "upgrade", "-y"], capture_output=True)
+    res = subprocess.run(["pkg", "upgrade", "-y"], capture_output=True, check=True)
     if res.returncode != 0:
         print(res.stderr.decode())
     
@@ -56,8 +56,15 @@ def initialize_pkg():
     return
 
 def install_required_apps():
-    subprocess.run("pkg install x11-repo -y", shell=True)
-    subprocess.run("pkg install tur-repo -y", shell=True)
+    try:
+        subprocess.run("pkg install x11-repo -y", shell=True, check=True)
+    except subprocess.CalledProcessError:
+        print("[-] Failed to install x11-repo")
+    
+    try:
+        subprocess.run("pkg install tur-repo -y", shell=True, check=True)
+    except subprocess.CalledProcessError:
+        print("[-] Failed to install tur-repo")
 
     apps_to_be_installed = ["neofetch", "zip", "git", "zsh", "neovim", "clang", "make", "lua55", "luarocks", "alacritty"]
     apps_to_be_installed_str = " ".join(apps_to_be_installed)
