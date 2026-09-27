@@ -1,10 +1,7 @@
 # main.py
-from colorama import Fore, Style, init
 import setup as setup_mod
 import configure as configure_mod
 import subprocess
-
-init(autoreset=True)
 
 
 MENU = """
@@ -17,6 +14,8 @@ MENU = """
 
 def main() -> int:
     subprocess.run("pip install rich colorama==0.4.6", shell=True)
+    from colorama import Fore, Style, init
+
     print(Fore.CYAN + Style.BRIGHT + MENU)
 
     choice = input("Choose [1-4]: ").strip()
