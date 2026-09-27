@@ -22,8 +22,6 @@ def main() -> int:
     install_font()
     install_required_apps()
     install_ui_packages()
-    configure_ui_packages()
-    configure_other_packages()
     clean_up()
     
     return 0
@@ -70,11 +68,11 @@ def install_required_apps():
 
 
     try:
-        subprocess.run(["apt install neofetch zip git zsh neovim clang make lua55 luarocks -y"], check=True, shell=True)
+        subprocess.run(["apt install neofetch zip git zsh neovim clang make lua55 luarocks alacritty -y"], check=True, shell=True)
     except subprocess.CalledProcessError:
         print("[-] failure in installing required apps chapter 1")
     try:
-        subprocess.run(["pkg install neofetch zip git zsh neovim clang make lua55 luarocks -y"], check=True, shell=True)
+        subprocess.run(["pkg install neofetch zip git zsh neovim clang make lua55 luarocks alacritty -y"], check=True, shell=True)
     except subprocess.CalledProcessError:
         print("[-] failure in installing required apps chapter 2")    
         
@@ -105,17 +103,6 @@ def install_ui_packages():
 
     return
 
-
-def configure_ui_packages():
-    #todo
-    return
-
-def configure_other_packages():
-    for p in ["~/.config/nvim", "~/.local/share/nvim", "~/.local/state/nvim", "~/.cache/nvim"]:
-        p = os.path.expanduser(p)
-        if os.path.exists(p):
-            shutil.move(p, p + ".bak") #backup config
-    subprocess.run("git clone https://github.com/LazyVim/starter ~/.config/nvim", shell=True) #nvim config
 
 
 def clean_up():
