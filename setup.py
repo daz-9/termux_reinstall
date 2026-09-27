@@ -49,7 +49,7 @@ def initialize_pkg():
     
 
     try:
-        subprocess.run(["pkg install curl wget jp2a -y"], shell=True, check=True)
+        subprocess.run("pkg install curl wget jp2a -y", shell=True, check=True)
     except subprocess.CalledProcessError:
             print("failure in installing installation apps")
 
@@ -62,13 +62,13 @@ def install_required_apps():
     apps_to_be_installed = ["neofetch", "zip", "git", "zsh", "neovim", "clang", "make", "lua55", "luarocks", "alacritty"]
     apps_to_be_installed_str = " ".join(apps_to_be_installed)
     try:
-        subprocess.run(["apt install " + apps_to_be_installed_str + " -y"], check=True, shell=True)
+        subprocess.run("apt install " + apps_to_be_installed_str + " -y", check=True, shell=True)
     except subprocess.CalledProcessError:
-        print("[-] failure in installing required apps chapter 1")
+        print("[-] apt install failed, falling back to pkg...")
         try:
-            subprocess.run(["pkg install " + apps_to_be_installed_str + " -y"], check=True, shell=True)
+            subprocess.run("pkg install " + apps_to_be_installed_str + " -y", check=True, shell=True)
         except subprocess.CalledProcessError:
-            print("[-] failure in installing required apps chapter 2")
+            print("[-] required apps installation failed, please check your internet connection and try again.")
     
         
     return
@@ -87,14 +87,14 @@ def install_ui_packages():
     apps_to_be_installed = ["polybar", "i3", "picom"]
     apps_to_be_installed_str = " ".join(apps_to_be_installed)
     try:
-        subprocess.run(["apt install " + apps_to_be_installed_str + " -y"], shell=True, check=True)
+        subprocess.run("apt install " + apps_to_be_installed_str + " -y", shell=True, check=True)
     
     except subprocess.CalledProcessError:
-        print("[-] failure in installing UI packages chapter 1.")
+        print("[-] apt install failed, falling back to pkg...")
         try: 
-            subprocess.run(["pkg install " + apps_to_be_installed_str + " -y"], shell=True, check=True)
+            subprocess.run("pkg install " + apps_to_be_installed_str + " -y", shell=True, check=True)
         except subprocess.CalledProcessError:
-            print("[-] failure in installing UI packages chapter 2.")
+            print("[-] UI packages installation failed, please check your internet connection and try again.")
             
 
     return
