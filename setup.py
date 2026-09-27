@@ -46,13 +46,6 @@ def initialize_pkg():
     res = subprocess.run(["pkg", "upgrade", "-y"], capture_output=True)
     if res.returncode != 0:
         print(res.stderr.decode())
-
-    res = subprocess.run(["pkg", "upgrade", "-y"], capture_output=True)
-    if res.returncode != 0:
-        print(res.stderr.decode())
-    res = subprocess.run(["apt", "upgrade", "-y"], capture_output=True)
-    if res.returncode != 0:
-        print(res.stderr.decode())
     
 
     try:
@@ -71,11 +64,11 @@ def install_required_apps():
         subprocess.run(["apt install neofetch zip git zsh neovim clang make lua55 luarocks alacritty -y"], check=True, shell=True)
     except subprocess.CalledProcessError:
         print("[-] failure in installing required apps chapter 1")
-    try:
-        subprocess.run(["pkg install neofetch zip git zsh neovim clang make lua55 luarocks alacritty -y"], check=True, shell=True)
-    except subprocess.CalledProcessError:
-        print("[-] failure in installing required apps chapter 2")    
-        
+        try:
+            subprocess.run(["pkg install neofetch zip git zsh neovim clang make lua55 luarocks alacritty -y"], check=True, shell=True)
+        except subprocess.CalledProcessError:
+            print("[-] failure in installing required apps chapter 2")
+    
         
     return
 
@@ -94,12 +87,11 @@ def install_ui_packages():
     
     except subprocess.CalledProcessError:
         print("[-] failure in installing UI packages chapter 1.")
-
-    try:
-        subprocess.run(["pkg install polybar i3 picom -y"], shell=True, check=True)
-
-    except subprocess.CalledProcessError:
-        print("[-] failure in installing UI packages chapter 2.")
+        try: 
+            subprocess.run(["pkg install polybar i3 picom -y"], shell=True, check=True)
+        except subprocess.CalledProcessError:
+            print("[-] failure in installing UI packages chapter 2.")
+            
 
     return
 
