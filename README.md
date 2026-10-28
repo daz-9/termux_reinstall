@@ -2,7 +2,7 @@
 
 ## Personal quick termux config for my CS class
 
-Will setup a basic C dev environment, UI sorely lacking, i have no idea what to put in a readme
+Will setup a basic C dev environment, and an opinionated TUI environment, i have no idea what to put in a readme
 Will set up lazyvim
 The zsh config is stolen from ohmyzsh
 

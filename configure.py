@@ -25,9 +25,6 @@ def configure_vim():
             shutil.move(p, p + ".bak") #backup config
     subprocess.run("git clone https://github.com/LazyVim/starter ~/.config/nvim", shell=True) #nvim config
 
-def configure_ui_packages():
-    #todo
-    return
 
 def move_files():
     here = os.path.dirname(os.path.abspath(__file__))
@@ -36,7 +33,7 @@ def move_files():
     if not os.path.exists(src):
         print("[-] start-desktop.sh not found")
         return
-    shutil.copy(src, dst)          # copy, not move
+    shutil.copy(src, dst)          # copy the file to home directory
     os.chmod(dst, 0o755)           # ensure executable
 
 if __name__ == "__main__":

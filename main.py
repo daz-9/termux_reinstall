@@ -49,10 +49,31 @@ def dispatch(choice: str) -> int:
 
 
 def main() -> int:
+
+
+
+
+
+
+
     # Flags for non-interactive use
     args = sys.argv[1:]
     if args:
         return dispatch(args[0].lstrip("-"))
+
+
+    subprocess.run("python -m pip install simple-term-menu==1.6.6", shell=True, check=True)
+    from simple_term_menu import TerminalMenu
+
+    terminal_menu = TerminalMenu(
+        ["setup", "configure"],
+        multi_select=True,
+        show_multi_select_hint=True,
+    )
+    menu_entry_indices = terminal_menu.show()
+    print(menu_entry_indices)
+    print(terminal_menu.chosen_menu_entries)
+    
 
     # No flags -> interactive
     print(MENU)

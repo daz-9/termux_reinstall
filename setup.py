@@ -10,7 +10,7 @@ def main() -> int:
 
 
 
-    subprocess.run("pip install rich colorama==0.4.6", shell=True, check=True)
+    subprocess.run("python -m pip install rich colorama==0.4.6", shell=True, check=True)
     
 
     try:
@@ -66,7 +66,7 @@ def install_required_apps():
     except subprocess.CalledProcessError:
         print("[-] Failed to install tur-repo")
 
-    apps_to_be_installed = ["neofetch", "zip", "git", "zsh", "neovim", "clang", "make", "lua55", "luarocks", "alacritty"]
+    apps_to_be_installed = ["neofetch", "zip", "git", "zsh", "neovim", "clang", "make", "lua55", "luarocks", "alacritty" , "tmux", "nnn", "fresh"]
     apps_to_be_installed_str = " ".join(apps_to_be_installed)
     try:
         subprocess.run("apt install " + apps_to_be_installed_str + " -y", check=True, shell=True)
