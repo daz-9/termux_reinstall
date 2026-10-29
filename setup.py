@@ -18,13 +18,33 @@ def main() -> int:
         welcome_message()
 
     except ImportError: #this hopefully works in case colorama can't be installed
-        print("[!] colorama could not be installed, skipping banner")    
+        print("[!] colorama could not be installed, skipping banner")   
+
+    from simple_term_menu import TerminalMenu #downloaded in main, so it should be available now
+
+    terminal_menu = TerminalMenu(
+        ["y", "n"],
+        title="Install UI packages?"
+    )
+    menu_entry_indices = terminal_menu.show()
+    #print(menu_entry_indices)
+    #print(terminal_menu.chosen_menu_entries)
+    
+
+    # If no menu entry was selected, exit with code 1
+
     install_font()
     install_required_apps()
-    install_ui_packages()
+    try:
+        if "y" in terminal_menu.chosen_menu_entries:
+            install_ui_packages()
+    except TypeError as e:
+        print(f"[!] An error occurred: {e}")
+
     clean_up()
     
     return 0
+
 
 
 def welcome_message():
@@ -35,18 +55,13 @@ def welcome_message():
     except subprocess.CalledProcessError:
         pass
     print(Style.BRIGHT + Fore.BLUE + "[+] Created by: meow \n")
-    sleep(4)
+    sleep(2)
     print(Style.BRIGHT + Fore.BLUE + "\n[+] Installed")
-    sleep(3)
+    sleep(2)
 
 def initialize_pkg():
     res = subprocess.run(["pkg", "update", "-y"], capture_output=True, check=True)
-    if res.returncode != 0:
-        print(res.stderr.decode())
     res = subprocess.run(["pkg", "upgrade", "-y"], capture_output=True, check=True)
-    if res.returncode != 0:
-        print(res.stderr.decode())
-    
 
     try:
         subprocess.run("pkg install curl wget jp2a -y", shell=True, check=True)
@@ -66,14 +81,14 @@ def install_required_apps():
     except subprocess.CalledProcessError:
         print("[-] Failed to install tur-repo")
 
-    apps_to_be_installed = ["neofetch", "zip", "git", "zsh", "neovim", "clang", "make", "lua55", "luarocks", "alacritty"]
+    apps_to_be_installed = ["neofetch", "zip", "git", "zsh", "neovim", "clang", "make", "lua55", "luarocks"] #todo: change the lazyvim/astronvim to prevent mason from installing clangd since its downloaded with clang, and mason breaks clangd installation in termux
     apps_to_be_installed_str = " ".join(apps_to_be_installed)
     try:
         subprocess.run("apt install " + apps_to_be_installed_str + " -y", check=True, shell=True)
     except subprocess.CalledProcessError:
         print("[-] apt install failed, falling back to pkg...")
         try:
-            subprocess.run("pkg install " + apps_to_be_installed_str + " -y", check=True, shell=True)
+            subprocess.run("pkg install " + apps_to_be_installed_str + " -y", check=True, shell=True)#pkg takes way too long to install, so we use apt first
         except subprocess.CalledProcessError:
             print("[-] required apps installation failed, please check your internet connection and try again.")
     
@@ -91,7 +106,7 @@ def install_font():
 
 def install_ui_packages():
 
-    apps_to_be_installed = ["polybar", "i3", "picom"]
+    apps_to_be_installed = ["polybar", "i3", "picom", "alacritty"] #todo: maybe remove?
     apps_to_be_installed_str = " ".join(apps_to_be_installed)
     try:
         subprocess.run("apt install " + apps_to_be_installed_str + " -y", shell=True, check=True)
@@ -109,8 +124,9 @@ def install_ui_packages():
 
 
 def clean_up():
-    subprocess.run("chsh -s zsh", shell=True) #taken from the official zsh page on termux docs
     subprocess.run("termux-reload-settings", shell=True)
+    subprocess.run("chsh -s zsh", shell=True) #taken from the official zsh page on termux docs
+
 
 
 

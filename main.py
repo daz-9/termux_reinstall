@@ -8,12 +8,6 @@ import sys
 HERE = os.path.dirname(os.path.abspath(__file__))
 PY = sys.executable  # the same python running this file
 
-MENU = """
-[1] Full install    (setup + configure)
-[2] Setup only      (packages, font, repos)
-[3] Configure only  (zsh, nvim, start-desktop.sh)
-[4] Quit
-"""
 
 
 def run_script(name: str) -> int:
@@ -26,63 +20,54 @@ def run_script(name: str) -> int:
     return subprocess.run([PY, path]).returncode
 
 
-def dispatch(choice: str) -> int:
-    if choice in ("1", "all"):
-        rc = run_script("setup.py")
-        if rc != 0:
-            print("[!] setup.py failed, skipping configure.")
-            return rc
-        return run_script("configure.py")
+def dispatch(choices: tuple[str, ...]) -> int:
 
-    if choice in ("2", "setup"):
-        return run_script("setup.py")
 
-    if choice in ("3", "configure"):
-        return run_script("configure.py")
+    handlers = {
+        "Setup":     lambda: run_script("setup.py"),
+        "Configure": lambda: run_script("configure.py"),
+    }
 
-    if choice in ("4", "quit", "q"):
-        print("Bye.")
-        return 0
-
-    print("[!] Invalid choice.")
-    return 1
+    rc = 0
+    for choice in choices:
+        handler = handlers.get(choice)
+        if handler is None:
+            print(f"[!] Invalid choice: {choice!r}")
+            rc = 1
+            continue
+        result = handler()
+        if result != 0:
+            rc = result
+    return rc
 
 
 def main() -> int:
-
-
-
-
-
-
+    subprocess.run("python -m pip install simple-term-menu==1.6.6", shell=True, check=True)
 
     # Flags for non-interactive use
     args = sys.argv[1:]
     if args:
-        return dispatch(args[0].lstrip("-"))
+        return dispatch((args[0].lstrip("-"),))
 
 
-    subprocess.run("python -m pip install simple-term-menu==1.6.6", shell=True, check=True)
     from simple_term_menu import TerminalMenu
 
     terminal_menu = TerminalMenu(
-        ["setup", "configure"],
+        ["Setup", "Configure"],
         multi_select=True,
         show_multi_select_hint=True,
+        title="Select what to install (use space to select, enter to confirm):"
     )
     menu_entry_indices = terminal_menu.show()
-    print(menu_entry_indices)
-    print(terminal_menu.chosen_menu_entries)
+    #print(menu_entry_indices)
+    #print(terminal_menu.chosen_menu_entries)
     
 
-    # No flags -> interactive
-    print(MENU)
-    try:
-        choice = input("Choose [1-4]: ").strip()
-    except (EOFError, KeyboardInterrupt):
-        print()
-        return 130
-    return dispatch(choice)
+    # If no menu entry was selected, exit with code 1
+    if not menu_entry_indices:
+        print("[!] No menu entry selected. Exiting.")
+        return 1
+    return dispatch(terminal_menu.chosen_menu_entries)
 
 
 if __name__ == "__main__":
