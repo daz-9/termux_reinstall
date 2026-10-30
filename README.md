@@ -5,16 +5,13 @@
 ## Personal quick termux config for my CS class
 
 Will setup a basic C dev environment, and an opinionated TUI environment, i have no idea what to put in a readme
-Will set up lazyvim
+Will set up the chosen nvim config
 The zsh config is stolen from ohmyzsh
 
-# TODO
+# todo
 
-1. picom configuration
-2. i3 configuration
-3. rofi configuration
-4. polybar configuration
-5. alacritty setup in i3
+`https://github.com/clangd/clangd/issues/1944`
+since lazyvim breaks clangd using mason
 
 # Warning
 

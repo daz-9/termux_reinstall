@@ -27,11 +27,7 @@ def main() -> int:
         title="Install UI packages?"
     )
     menu_entry_indices = terminal_menu.show()
-    #print(menu_entry_indices)
-    #print(terminal_menu.chosen_menu_entries)
-    
 
-    # If no menu entry was selected, exit with code 1
 
     install_font()
     install_required_apps()
