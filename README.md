@@ -31,7 +31,7 @@ Installs the packages:
 |----------|----------|
 | C toolchain | `clang`, `make`, `gdb`, `valgrind`, `xmake` (skipped if already installed) |
 | Editor | `neovim`, `lua55`, `luarocks`, `ripgrep`, `fd`, `fzf`, `lazygit` |
-| Shell & CLI | `zsh`, `git`, `zip`, `eza`, `yazi`, `tmux`, `man`, `neofetch` |
+| Shell & CLI | `zsh`, `starship`, `git`, `zip`, `eza`, `yazi`, `zoxide`, `bat`, `tmux`, `man`, `neofetch` |
 | GitHub | `openssh`, `gh` |
 
 Then sets **zsh** as the default shell (only if zsh actually installed).
@@ -42,9 +42,10 @@ If a step fails, the script prints why, carries on, and lists every failed step 
 
 | Option | What it does |
 |--------|--------------|
-| **Zsh** | Installs [Oh My Zsh](https://ohmyz.sh/), the `zsh-autosuggestions` + `zsh-syntax-highlighting` plugins (plus built-in `git`, `z`, `colored-man-pages`), and aliases (see below) |
+| **Zsh** | Installs [Oh My Zsh](https://ohmyz.sh/), `zsh-autosuggestions` + `zsh-syntax-highlighting` (plus `git`, `z`, `colored-man-pages`), wires up `zoxide`/`fzf`/`bat`, configures [Starship](https://starship.rs/) (`~/.config/starship.toml`, with `xmake` & C support), and adds aliases |
 | **Neovim** | Installs [LazyVim](https://www.lazyvim.org/) or [AstroNvim](https://astronvim.com/). Existing configs are backed up to `*.bak`. Uses Termux's own `clangd` because Mason can't install it on Android ([clangd#1944](https://github.com/clangd/clangd/issues/1944)) |
 | **Font** | Installs JetBrainsMono Nerd Font as the Termux font |
+| **Tmux** | Writes `~/.tmux.conf` (Catppuccin Mocha bar, mouse support, `Ctrl-a`/`Ctrl-b` prefix, `\|`/`-` splits, `Alt+Arrow` pane switching, `vi` copy mode) |
 
 #### Zsh aliases
 
@@ -65,7 +66,7 @@ Skip the menus by passing flags (case-insensitive, any number of them):
 
 ```sh
 python main.py --setup --configure
-python configure.py --zsh --font --lazyvim     # or --astronvim / --neovim (opens menu)
+python configure.py --zsh --font --tmux --lazyvim     # or --astronvim / --neovim (opens menu)
 ```
 
 ---

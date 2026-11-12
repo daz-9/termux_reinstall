@@ -70,7 +70,7 @@ def install_required_apps():
 
     apps_to_be_installed = [
         # base / shell
-        "neofetch", "zip", "git", "zsh", "eza", "yazi", "tmux", "man",
+        "neofetch", "zip", "git", "zsh", "starship", "eza", "yazi", "zoxide", "bat", "tmux", "man",
         # C toolchain
         "clang", "make", "gdb", "valgrind",
         # neovim + what LazyVim needs for search/pickers

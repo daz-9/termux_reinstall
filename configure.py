@@ -39,7 +39,7 @@ def main() -> int:
     from simple_term_menu import TerminalMenu
 
     terminal_menu = TerminalMenu(
-        ["Zsh", "Neovim", "Font"],
+        ["Zsh", "Neovim", "Font", "Tmux"],
         multi_select=True,
         show_multi_select_hint=True,
         title="Select what to configure (use space to select, enter to confirm):"
@@ -81,6 +81,7 @@ def dispatch(choices: tuple[str, ...]) -> int:
         "lazyvim": lambda: configure_vim_lazyvim(),    # flag-only shortcut, skips the nvim menu
         "astronvim": lambda: configure_vim_astrovim(), # flag-only shortcut, skips the nvim menu
         "font": lambda: configure_font(),
+        "tmux": lambda: configure_tmux(),
     }
 
     rc = 0
@@ -146,7 +147,10 @@ def configure_zsh():
 
     plugins = install_zsh_plugins(omz_dir)
     enable_zsh_plugins(plugins)
-    add_zsh_aliases()
+    _append_zshrc_block(ZSH_ALIASES_MARKER, ZSH_ALIASES, "aliases")
+    _append_zshrc_block(ZSH_CLI_TOOLS_MARKER, ZSH_CLI_TOOLS, "CLI tools (zoxide, fzf, bat)")
+    configure_starship()
+    _append_zshrc_block(ZSH_STARSHIP_MARKER, ZSH_STARSHIP, "starship prompt")
     return 0
 
 
@@ -213,20 +217,191 @@ alias cc='clang -Wall -Wextra -g'
 # <<< termux_reinstall aliases <<<
 """
 
-def add_zsh_aliases():
-    """Append the alias block to ~/.zshrc once (re-running doesn't duplicate it)."""
+ZSH_CLI_TOOLS_MARKER = "# >>> CLI tools (zoxide, fzf, bat) >>>"
+ZSH_CLI_TOOLS = f"""
+{ZSH_CLI_TOOLS_MARKER}
+if command -v zoxide >/dev/null 2>&1; then
+  unalias z 2>/dev/null
+  eval "$(zoxide init zsh)"
+fi
+
+if command -v fzf >/dev/null 2>&1; then
+  source <(fzf --zsh)
+fi
+
+if command -v bat >/dev/null 2>&1; then
+  export BAT_THEME="Catppuccin Mocha"
+  alias cat='bat --paging=never'
+  export MANPAGER="sh -c 'col -bx | bat -l man -p'"
+fi
+# <<< CLI tools (zoxide, fzf, bat) <<<
+"""
+
+ZSH_STARSHIP_MARKER = "# >>> starship prompt >>>"
+ZSH_STARSHIP = f"""
+{ZSH_STARSHIP_MARKER}
+if command -v starship >/dev/null 2>&1; then
+  eval "$(starship init zsh)"
+fi
+# <<< starship prompt <<<
+"""
+
+STARSHIP_CONFIG = """# Starship configuration matching Catppuccin Mocha & Termux screen width
+
+format = \"\"\"
+$directory\\
+$git_branch\\
+$git_status\\
+$c\\
+$xmake\\
+$fill\\
+$cmd_duration\\
+$line_break\\
+$character\"\"\"
+
+# Don't print empty line between prompts on mobile screen
+add_newline = false
+
+[directory]
+style = "bold lavender"
+truncation_length = 3
+truncate_to_repo = true
+read_only = " 󰌾"
+
+[git_branch]
+symbol = " "
+style = "bold mauve"
+
+[git_status]
+style = "bold red"
+format = '([$all_status$ahead_behind]($style) )'
+
+[c]
+symbol = " "
+style = "bold sapphire"
+format = "via [$symbol($version )]($style)"
+
+[xmake]
+symbol = " "
+style = "bold sapphire"
+format = "via [$symbol($version )]($style)"
+
+[cmd_duration]
+min_time = 2_000
+style = "bold yellow"
+format = "took [$duration]($style)"
+
+[fill]
+symbol = " "
+
+[character]
+success_symbol = "[❯](bold green)"
+error_symbol = "[❯](bold red)"
+vicmd_symbol = "[❮](bold peach)"
+"""
+
+
+def _append_zshrc_block(marker: str, block: str, label: str):
+    """Append a marked config block to ~/.zshrc once (re-running doesn't duplicate it)."""
     zshrc = os.path.expanduser("~/.zshrc")
     try:
         existing = open(zshrc).read() if os.path.exists(zshrc) else ""
-        if ZSH_ALIASES_MARKER in existing:
-            print("[+] aliases already in ~/.zshrc")
+        if marker in existing:
+            print(f"[+] {label} already in ~/.zshrc")
             return
         with open(zshrc, "a") as f:
-            f.write(ZSH_ALIASES)
-        print("[+] added aliases to ~/.zshrc")
+            f.write(block)
+        print(f"[+] added {label} to ~/.zshrc")
     except OSError as e:
-        print(f"[-] adding aliases failed: {e}")
-        failures.append("adding zsh aliases")
+        print(f"[-] adding {label} failed: {e}")
+        failures.append(f"adding zsh {label}")
+
+
+def configure_starship():
+    path = os.path.expanduser("~/.config/starship.toml")
+    try:
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "w") as f:
+            f.write(STARSHIP_CONFIG)
+        print("[+] wrote ~/.config/starship.toml")
+    except OSError as e:
+        print(f"[-] writing starship.toml failed: {e}")
+        failures.append("writing starship.toml")
+    if not shutil.which("starship"):
+        print("[!] starship not found yet, install starship (run Setup) to enable prompt")
+
+
+TMUX_CONF = """# True color & Neovim compatibility
+set -g default-terminal "tmux-256color"
+set -ag terminal-overrides ",xterm-256color:RGB"
+set -sg escape-time 0
+set -g focus-events on
+
+# Prefix: Ctrl-b (default) + Ctrl-a (easier to reach)
+set -g prefix2 C-a
+bind C-a send-prefix -2
+
+# Mouse & scrollback
+set -g mouse on
+set -g history-limit 10000
+
+# 1-based indexing (matches keyboard layout)
+set -g base-index 1
+setw -g pane-base-index 1
+set -g renumber-windows on
+
+# Intuitive splits (keep current directory)
+bind | split-window -h -c "#{pane_current_path}"
+bind - split-window -v -c "#{pane_current_path}"
+bind c new-window -c "#{pane_current_path}"
+
+# Fast pane navigation with Alt+Arrow (no prefix needed)
+bind -n M-Left select-pane -L
+bind -n M-Right select-pane -R
+bind -n M-Up select-pane -U
+bind -n M-Down select-pane -D
+
+# Vim-style pane navigation with prefix
+bind h select-pane -L
+bind j select-pane -D
+bind k select-pane -U
+bind l select-pane -R
+
+# Reload config
+bind r source-file ~/.tmux.conf \\; display-message "tmux.conf reloaded"
+
+# Vi copy mode
+setw -g mode-keys vi
+bind -T copy-mode-vi v send-keys -X begin-selection
+bind -T copy-mode-vi y send-keys -X copy-selection-and-cancel
+
+# Catppuccin Mocha status bar
+set -g status-position bottom
+set -g status-style "bg=#181825,fg=#cdd6f4"
+set -g status-left "#[bg=#89b4fa,fg=#1e1e2e,bold] #S #[bg=#181825] "
+set -g status-right "#[fg=#a6adc8]%H:%M "
+setw -g window-status-format "#[fg=#6c7086] #I:#W "
+setw -g window-status-current-format "#[bg=#313244,fg=#cba6f7,bold] #I:#W "
+set -g pane-border-style "fg=#313244"
+set -g pane-active-border-style "fg=#89b4fa"
+"""
+
+
+def configure_tmux():
+    path = os.path.expanduser("~/.tmux.conf")
+    try:
+        if os.path.exists(path):
+            shutil.copy2(path, path + ".bak")
+        with open(path, "w") as f:
+            f.write(TMUX_CONF)
+        print("[+] wrote ~/.tmux.conf")
+        if not shutil.which("tmux"):
+            print("[!] tmux not found yet, install tmux (run Setup) to use it")
+        return 0
+    except OSError as e:
+        print(f"[-] writing ~/.tmux.conf failed: {e}")
+        failures.append("writing ~/.tmux.conf")
+        return 1
 
 def configure_font():
     ok = run("mkdir -p ~/.termux/", "creating ~/.termux")
