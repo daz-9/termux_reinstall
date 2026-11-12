@@ -29,19 +29,33 @@ Installs the packages:
 
 | Category | Packages |
 |----------|----------|
-| C toolchain | `clang`, `make` |
-| Editor | `neovim`, `lua55`, `luarocks` |
-| Shell & CLI | `zsh`, `git`, `zip`, `eza`, `yazi`, `neofetch` |
+| C toolchain | `clang`, `make`, `gdb`, `valgrind`, `xmake` (skipped if already installed) |
+| Editor | `neovim`, `lua55`, `luarocks`, `ripgrep`, `fd`, `fzf`, `lazygit` |
+| Shell & CLI | `zsh`, `git`, `zip`, `eza`, `yazi`, `tmux`, `man`, `neofetch` |
+| GitHub | `openssh`, `gh` |
 
-Then sets **zsh** as the default shell.
+Then sets **zsh** as the default shell (only if zsh actually installed).
+
+If a step fails, the script prints why, carries on, and lists every failed step at the end.
 
 ### Configure
 
 | Option | What it does |
 |--------|--------------|
-| **Zsh** | Installs [Oh My Zsh](https://ohmyz.sh/) (the zsh config is taken from there) |
-| **Neovim** | Installs [LazyVim](https://www.lazyvim.org/) or [AstroNvim](https://astronvim.com/). Existing configs are backed up to `*.bak` |
+| **Zsh** | Installs [Oh My Zsh](https://ohmyz.sh/), the `zsh-autosuggestions` + `zsh-syntax-highlighting` plugins (plus built-in `git`, `z`, `colored-man-pages`), and aliases (see below) |
+| **Neovim** | Installs [LazyVim](https://www.lazyvim.org/) or [AstroNvim](https://astronvim.com/). Existing configs are backed up to `*.bak`. Uses Termux's own `clangd` because Mason can't install it on Android ([clangd#1944](https://github.com/clangd/clangd/issues/1944)) |
 | **Font** | Installs JetBrainsMono Nerd Font as the Termux font |
+
+#### Zsh aliases
+
+| Alias | Runs |
+|-------|------|
+| `ls` / `ll` / `la` / `tree` | `eza` with icons (`ll`/`la` show git status) |
+| `lg` | `lazygit` |
+| `v` | `nvim` |
+| `cc` | `clang -Wall -Wextra -g` |
+
+Re-running the Zsh option is safe: nothing gets duplicated in `~/.zshrc`.
 
 ---
 
@@ -53,12 +67,6 @@ Skip the menus by passing flags (case-insensitive, any number of them):
 python main.py --setup --configure
 python configure.py --zsh --font --lazyvim     # or --astronvim / --neovim (opens menu)
 ```
-
----
-
-## 📝 TODO
-
-- LazyVim's Mason breaks clangd on Termux ([clangd#1944](https://github.com/clangd/clangd/issues/1944)). Use the `clangd` that ships with `clang` instead.
 
 ---
 
