@@ -70,9 +70,9 @@ def install_required_apps():
 
     apps_to_be_installed = [
         # base / shell
-        "neofetch", "zip", "git", "zsh", "starship", "eza", "yazi", "zoxide", "bat", "tmux", "man",
+        "fastfetch", "zip", "git", "zsh", "starship", "eza", "yazi", "zoxide", "bat", "tmux", "man", "manpages", "termux-api",
         # C toolchain
-        "clang", "make", "gdb", "valgrind",
+        "clang", "lldb", "gdb", "make", "bear",
         # neovim + what LazyVim needs for search/pickers
         "neovim", "lua55", "luarocks", "ripgrep", "fd", "fzf", "lazygit",
         # github
@@ -93,12 +93,123 @@ def install_required_apps():
     return
 
 
+XMAKE_PLUGINS = {
+    "br": """task("br")
+    set_category("plugin")
+    on_run(function ()
+        import("core.base.option")
+        import("core.project.config")
+        config.load()
+        local cur_policies = config.get("policies") or ""
+        if cur_policies:find("sanitizer") then
+            os.exec("xmake f -q --policies=")
+        end
+        os.exec("xmake build")
+        local args = {"run"}
+        for _, a in ipairs(option.get("arguments") or {}) do
+            table.insert(args, a)
+        end
+        os.execv("xmake", args)
+    end)
+    set_menu {
+        usage = "xmake br [arguments...]",
+        description = "Build and run the target in one step (like cargo run).",
+        options = {
+            {nil, "arguments", "vs", nil, "Arguments passed to the target binary."}
+        }
+    }
+""",
+    "san": """task("san")
+    set_category("plugin")
+    on_run(function ()
+        import("core.base.option")
+        import("core.project.config")
+        config.load()
+        local cur_policies = config.get("policies") or ""
+        if config.get("mode") ~= "debug" or not cur_policies:find("sanitizer%.address") then
+            os.exec("xmake f -q -m debug --policies=build.sanitizer.address,build.sanitizer.undefined")
+        end
+        os.exec("xmake build")
+        local args = {"run"}
+        for _, a in ipairs(option.get("arguments") or {}) do
+            table.insert(args, a)
+        end
+        os.execv("xmake", args)
+    end)
+    set_menu {
+        usage = "xmake san [arguments...]",
+        description = "Build and run with AddressSanitizer + UndefinedBehaviorSanitizer.",
+        options = {
+            {nil, "arguments", "vs", nil, "Arguments passed to the target binary."}
+        }
+    }
+""",
+    "dbg": """task("dbg")
+    set_category("plugin")
+    on_run(function ()
+        import("core.base.option")
+        import("core.project.config")
+        config.load()
+        if config.get("mode") ~= "debug" or (config.get("policies") and config.get("policies") ~= "") then
+            os.exec("xmake f -q -m debug --policies=")
+        end
+        os.exec("xmake build")
+        local args = {"run", "-d"}
+        for _, a in ipairs(option.get("arguments") or {}) do
+            table.insert(args, a)
+        end
+        os.execv("xmake", args)
+    end)
+    set_menu {
+        usage = "xmake dbg [arguments...]",
+        description = "Build in debug mode and launch interactive debugger (lldb).",
+        options = {
+            {nil, "arguments", "vs", nil, "Arguments passed to the target binary."}
+        }
+    }
+""",
+}
+
+
 def install_xmake():
     if shutil.which("xmake"):
         print("[+] xmake already installed, skipping")
-        return
-    print("[*] xmake not found, installing...")
-    run("pkg install xmake -y", "installing xmake")
+    else:
+        print("[*] xmake not found, installing...")
+        run("pkg install xmake -y", "installing xmake")
+
+    # Patch xmake's default C/C++ console templates so `xmake create` auto-updates compile_commands.json & enables warnings
+    prefix = os.environ.get("PREFIX", "/data/data/com.termux/files/usr")
+    rule = 'add_rules("plugin.compile_commands.autoupdate", {outputdir = "."})\nset_warnings("all", "extra")'
+    for lang in ("c", "c++"):
+        tpl = os.path.join(prefix, f"share/xmake/templates/{lang}/console/xmake.lua")
+        if os.path.exists(tpl):
+            try:
+                text = open(tpl).read()
+                if "plugin.compile_commands.autoupdate" not in text:
+                    text = text.replace(
+                        'add_rules("mode.debug", "mode.release")',
+                        f'add_rules("mode.debug", "mode.release")\n{rule}',
+                        1,
+                    )
+                    with open(tpl, "w") as f:
+                        f.write(text)
+                    print(f"[+] patched xmake {lang} template (compile_commands + warnings)")
+            except OSError as e:
+                print(f"[-] patching xmake {lang} template failed: {e}")
+
+    # Install custom xmake plugins (xmake br, xmake san, xmake dbg)
+    plugins_root = os.path.expanduser("~/.xmake/plugins")
+    for name, code in XMAKE_PLUGINS.items():
+        try:
+            pdir = os.path.join(plugins_root, name)
+            os.makedirs(pdir, exist_ok=True)
+            with open(os.path.join(pdir, "xmake.lua"), "w") as f:
+                f.write(code)
+            print(f"[+] installed xmake plugin: xmake {name}")
+        except OSError as e:
+            print(f"[-] installing xmake plugin {name} failed: {e}")
+            failures.append(f"installing xmake {name} plugin")
 
 
 def clean_up():

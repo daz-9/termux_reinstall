@@ -29,9 +29,9 @@ Installs the packages:
 
 | Category | Packages |
 |----------|----------|
-| C toolchain | `clang`, `make`, `gdb`, `valgrind`, `xmake` (skipped if already installed) |
+| C toolchain | `clang`, `lldb`, `gdb`, `make`, `bear`, `xmake` (with custom `br`, `san`, `dbg` plugins & `clangd` templates) |
 | Editor | `neovim`, `lua55`, `luarocks`, `ripgrep`, `fd`, `fzf`, `lazygit` |
-| Shell & CLI | `zsh`, `starship`, `git`, `zip`, `eza`, `yazi`, `zoxide`, `bat`, `tmux`, `man`, `neofetch` |
+| Shell & CLI | `zsh`, `starship`, `git`, `zip`, `eza`, `yazi`, `zoxide`, `bat`, `tmux`, `man`, `manpages`, `fastfetch`, `termux-api` |
 | GitHub | `openssh`, `gh` |
 
 Then sets **zsh** as the default shell (only if zsh actually installed).
@@ -42,10 +42,10 @@ If a step fails, the script prints why, carries on, and lists every failed step 
 
 | Option | What it does |
 |--------|--------------|
-| **Zsh** | Installs [Oh My Zsh](https://ohmyz.sh/), `zsh-autosuggestions` + `zsh-syntax-highlighting` (plus `git`, `z`, `colored-man-pages`), wires up `zoxide`/`fzf`/`bat`, configures [Starship](https://starship.rs/) (`~/.config/starship.toml`, with `xmake` & C support), and adds aliases |
+| **Zsh** | Installs [Oh My Zsh](https://ohmyz.sh/), `zsh-autosuggestions` + `zsh-syntax-highlighting` (plus `git`, `colored-man-pages`), wires up `zoxide`/`fzf`/`bat`/`fastfetch`, configures [Starship](https://starship.rs/) (`~/.config/starship.toml`, with `xmake` & C support), and adds aliases |
 | **Neovim** | Installs [LazyVim](https://www.lazyvim.org/) or [AstroNvim](https://astronvim.com/). Existing configs are backed up to `*.bak`. Uses Termux's own `clangd` because Mason can't install it on Android ([clangd#1944](https://github.com/clangd/clangd/issues/1944)) |
-| **Font** | Installs JetBrainsMono Nerd Font as the Termux font |
-| **Tmux** | Writes `~/.tmux.conf` (Catppuccin Mocha bar, mouse support, `Ctrl-a`/`Ctrl-b` prefix, `\|`/`-` splits, `Alt+Arrow` pane switching, `vi` copy mode) |
+| **Font** | Installs JetBrainsMono Nerd Font (`~/.termux/font.ttf`) and Catppuccin Mocha terminal colors (`~/.termux/colors.properties`) |
+| **Tmux** | Writes `~/.tmux.conf` (Catppuccin Mocha bar, mouse support, `Ctrl-a`/`Ctrl-b` prefix, `\|`/`-` splits, `Alt+Arrow` pane switching, `vi` copy mode with Android clipboard via `termux-clipboard-set`) |
 
 #### Zsh aliases
 
@@ -55,6 +55,8 @@ If a step fails, the script prints why, carries on, and lists every failed step 
 | `lg` | `lazygit` |
 | `v` | `nvim` |
 | `cc` | `clang -Wall -Wextra -g` |
+| `ccsan` | `clang -Wall -Wextra -g -O1 -fsanitize=address,undefined -fno-omit-frame-pointer` |
+| `xcc` | `xmake project -k compile_commands` |
 
 Re-running the Zsh option is safe: nothing gets duplicated in `~/.zshrc`.
 

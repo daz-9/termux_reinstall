@@ -189,7 +189,7 @@ def enable_zsh_plugins(extra: list[str]):
         failures.append("enabling zsh plugins (no plugins= line)")
         return
     current = m.group(1).split()
-    wanted = ["git", "z", "colored-man-pages"] + extra  # git/z/colored-man-pages ship with omz
+    wanted = ["git", "colored-man-pages"] + extra  # git/colored-man-pages ship with omz (zoxide replaces omz's z)
     merged = current + [p for p in wanted if p not in current]
     # syntax-highlighting has to be loaded last
     if "zsh-syntax-highlighting" in merged:
@@ -214,6 +214,10 @@ command -v lazygit >/dev/null && alias lg='lazygit'
 alias v='nvim'
 # compile C with warnings + debug info, e.g. `cc main.c -o main`
 alias cc='clang -Wall -Wextra -g'
+# compile C with AddressSanitizer + UndefinedBehaviorSanitizer (replaces valgrind on Android)
+alias ccsan='clang -Wall -Wextra -g -O1 -fsanitize=address,undefined -fno-omit-frame-pointer'
+# generate compile_commands.json for clangd in xmake projects
+alias xcc='xmake project -k compile_commands'
 # <<< termux_reinstall aliases <<<
 """
 
@@ -234,6 +238,9 @@ if command -v bat >/dev/null 2>&1; then
   alias cat='bat --paging=never'
   export MANPAGER="sh -c 'col -bx | bat -l man -p'"
 fi
+
+# Run fastfetch only in top-level interactive shells (not inside tmux splits or Neovim)
+[[ -z "$TMUX" && -z "$NVIM" ]] && command -v fastfetch >/dev/null 2>&1 && fastfetch
 # <<< CLI tools (zoxide, fzf, bat) <<<
 """
 
@@ -370,10 +377,10 @@ bind l select-pane -R
 # Reload config
 bind r source-file ~/.tmux.conf \\; display-message "tmux.conf reloaded"
 
-# Vi copy mode
+# Vi copy mode (y copies to Android clipboard via termux-api when available)
 setw -g mode-keys vi
 bind -T copy-mode-vi v send-keys -X begin-selection
-bind -T copy-mode-vi y send-keys -X copy-selection-and-cancel
+bind -T copy-mode-vi y send-keys -X copy-pipe-and-cancel "termux-clipboard-set"
 
 # Catppuccin Mocha status bar
 set -g status-position bottom
@@ -403,10 +410,48 @@ def configure_tmux():
         failures.append("writing ~/.tmux.conf")
         return 1
 
+TERMUX_COLORS = """# https://github.com/catppuccin/catppuccin (Catppuccin Mocha)
+foreground=#cdd6f4
+background=#1e1e2e
+cursor=#f5e0dc
+
+color0=#45475a
+color1=#f38ba8
+color2=#a6e3a1
+color3=#f9e2af
+color4=#89b4fa
+color5=#f5c2e7
+color6=#94e2d5
+color7=#bac2de
+
+color8=#585b70
+color9=#f38ba8
+color10=#a6e3a1
+color11=#f9e2af
+color12=#89b4fa
+color13=#f5c2e7
+color14=#94e2d5
+color15=#a6adc8
+
+color16=#fab387
+color17=#f5e0dc
+"""
+
+
 def configure_font():
+    termux_dir = os.path.expanduser("~/.termux")
     ok = run("mkdir -p ~/.termux/", "creating ~/.termux")
     # download to a temp file first so a failed download doesn't wipe the current font
     ok = ok and run("curl -fsSL https://raw.githubusercontent.com/ryanoasis/nerd-fonts/master/patched-fonts/JetBrainsMono/Ligatures/JetBrainsMonoNerdFont-Regular.ttf -o ~/.termux/font.ttf.tmp && mv ~/.termux/font.ttf.tmp ~/.termux/font.ttf", "downloading Nerd Font")
+    try:
+        os.makedirs(termux_dir, exist_ok=True)
+        with open(os.path.join(termux_dir, "colors.properties"), "w") as f:
+            f.write(TERMUX_COLORS)
+        print("[+] wrote ~/.termux/colors.properties (Catppuccin Mocha)")
+    except OSError as e:
+        print(f"[-] writing ~/.termux/colors.properties failed: {e}")
+        failures.append("writing ~/.termux/colors.properties")
+        ok = False
     if ok:
         run("termux-reload-settings", "termux-reload-settings")
     return 0 if ok else 1
