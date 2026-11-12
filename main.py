@@ -23,14 +23,15 @@ def run_script(name: str) -> int:
 def dispatch(choices: tuple[str, ...]) -> int:
 
 
+    # keys are lowercase so menu entries ("Setup") and flags ("--setup") both match
     handlers = {
-        "Setup":     lambda: run_script("setup.py"),
-        "Configure": lambda: run_script("configure.py"),
+        "setup":     lambda: run_script("setup.py"),
+        "configure": lambda: run_script("configure.py"),
     }
 
     rc = 0
     for choice in choices:
-        handler = handlers.get(choice)
+        handler = handlers.get(choice.lower())
         if handler is None:
             print(f"[!] Invalid choice: {choice!r}")
             rc = 1
@@ -47,7 +48,7 @@ def main() -> int:
     # Flags for non-interactive use
     args = sys.argv[1:]
     if args:
-        return dispatch((args[0].lstrip("-"),))
+        return dispatch(tuple(arg.lstrip("-") for arg in args))
 
 
     from simple_term_menu import TerminalMenu
