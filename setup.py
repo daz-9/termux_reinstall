@@ -1,12 +1,16 @@
-from time import sleep
-import subprocess
-import shutil
+#!/usr/bin/env python3
+"""Install Termux packages, toolchains, xmake plugins, and native LSP servers."""
+
 import os
+import shutil
+import subprocess
+from time import sleep
 
-
-# everything that failed gets collected here and printed at the end
+# Everything that failed gets collected here and printed at the end
 failures: list[str] = []
 
+
+# --- Helpers -----------------------------------------------------------------
 
 def run(cmd, desc: str) -> bool:
     """Run a command, report failure to the user and keep going. Returns True on success."""
@@ -19,39 +23,24 @@ def run(cmd, desc: str) -> bool:
         return False
 
 
-def main() -> int:
-
-    initialize_pkg()
-
-
-
-    run("python -m pip install rich colorama==0.4.6", "pip install rich/colorama")
-    
-
-    try:
-
-        welcome_message()
-
-    except ImportError: #this hopefully works in case colorama can't be installed
-        print("[!] colorama could not be installed, skipping banner")   
-
-    install_required_apps()
-    install_xmake()
-    install_csharp_ls()
-    install_basedpyright()
-
-    clean_up()
-
-    print_summary()
-    return 1 if failures else 0
+def print_summary():
+    """Print a final report of any steps that failed during setup."""
+    if not failures:
+        print("\n[+] Setup finished with no errors")
+        return
+    print(f"\n[!] Setup finished with {len(failures)} problem(s):")
+    for f in failures:
+        print(f"    - {f}")
 
 
+# --- Package Installation ----------------------------------------------------
 
 def welcome_message():
-    from colorama import Fore, Back, Style, init
+    """Display the startup ASCII banner."""
+    from colorama import Fore, Style
 
-    try :
-        subprocess.run("jp2a https://assets.stickpng.com/images/613098fd48f1e30004910189.png  --color ", shell=True)
+    try:
+        subprocess.run("jp2a https://assets.stickpng.com/images/613098fd48f1e30004910189.png --color", shell=True)
     except subprocess.CalledProcessError:
         pass
     print(Style.BRIGHT + Fore.BLUE + "[+] Created by: meow \n")
@@ -59,41 +48,46 @@ def welcome_message():
     print(Style.BRIGHT + Fore.BLUE + "\n[+] Installed")
     sleep(2)
 
+
 def initialize_pkg():
+    """Update Termux package lists and install bootstrap utilities."""
     run(["pkg", "update", "-y"], "pkg update")
     run(["pkg", "upgrade", "-y"], "pkg upgrade")
-
     run("pkg install curl wget jp2a -y", "installing installation apps (curl, wget, jp2a)")
 
-    return
 
 def install_required_apps():
+    """Install core CLI, C/C++ toolchain, Neovim, and GitHub packages."""
     run("pkg install tur-repo -y", "installing tur-repo")
 
     apps_to_be_installed = [
-        # base / shell
-        "fastfetch", "zip", "git", "zsh", "starship", "eza", "yazi", "zoxide", "bat", "tmux", "man", "manpages", "termux-api",
+        # Base / shell
+        "fastfetch", "zip", "git", "zsh", "starship", "eza", "yazi", "zoxide",
+        "bat", "tmux", "man", "manpages", "termux-api",
         # C toolchain
         "clang", "lldb", "gdb", "make", "bear",
-        # neovim + what LazyVim/AstroNvim need for search/pickers/LSP
-        "neovim", "lua55", "luarocks", "lua-language-server", "dotnet-sdk-9.0", "nodejs", "ruff", "ripgrep", "fd", "fzf", "lazygit",
-        # github
+        # Neovim + pickers + native LSP runtimes
+        "neovim", "lua55", "luarocks", "lua-language-server", "dotnet-sdk-9.0",
+        "nodejs", "ruff", "ripgrep", "fd", "fzf", "lazygit",
+        # GitHub
         "git", "openssh", "gh",
     ]
     apps_to_be_installed = list(dict.fromkeys(apps_to_be_installed))  # dedupe, keep order
     apps_to_be_installed_str = " ".join(apps_to_be_installed)
+
+    # pkg takes much longer than apt for bulk installs, so try apt first
     try:
         subprocess.run("apt install " + apps_to_be_installed_str + " -y", check=True, shell=True)
         return
     except subprocess.CalledProcessError:
         print("[-] apt install failed, falling back to installing one by one with pkg...")
 
-    # one bad package makes the bulk install fail, so install individually and report which ones failed
+    # One bad package makes bulk install fail; install individually to isolate failures
     for app in apps_to_be_installed:
-        run(f"pkg install {app} -y", f"installing {app}") #pkg takes way too long to install, so we use apt first
+        run(f"pkg install {app} -y", f"installing {app}")
 
-    return
 
+# --- Xmake & LSP Tooling -----------------------------------------------------
 
 XMAKE_PLUGINS = {
     "br": """task("br")
@@ -174,6 +168,7 @@ XMAKE_PLUGINS = {
 
 
 def install_xmake():
+    """Install xmake, patch C/C++ console templates, and install custom plugins."""
     if shutil.which("xmake"):
         print("[+] xmake already installed, skipping")
     else:
@@ -215,6 +210,7 @@ def install_xmake():
 
 
 def install_csharp_ls():
+    """Install csharp-ls 0.16.0 as a .NET global tool (compatible with Termux .NET 9)."""
     tool_bin = os.path.expanduser("~/.dotnet/tools/csharp-ls")
     if shutil.which("csharp-ls") or os.path.exists(tool_bin):
         print("[+] csharp-ls already installed, skipping")
@@ -228,6 +224,7 @@ def install_csharp_ls():
 
 
 def install_basedpyright():
+    """Install basedpyright globally via npm for Python type checking in Neovim."""
     if shutil.which("basedpyright-langserver"):
         print("[+] basedpyright already installed, skipping")
         return
@@ -240,31 +237,35 @@ def install_basedpyright():
 
 
 def clean_up():
+    """Reload Termux settings and set zsh as the default login shell."""
     run("termux-reload-settings", "termux-reload-settings")
-    # only switch shell if zsh actually got installed, otherwise the user gets locked into a missing shell
+    # Only switch shell if zsh actually got installed, otherwise the user gets locked into a missing shell
     if shutil.which("zsh"):
-        run("chsh -s zsh", "setting zsh as default shell") #taken from the official zsh page on termux docs
+        run("chsh -s zsh", "setting zsh as default shell")  # from official Termux zsh docs
     else:
         print("[-] zsh is not installed, not changing the default shell")
         failures.append("zsh missing, default shell not changed")
 
 
-def print_summary():
-    if not failures:
-        print("\n[+] Setup finished with no errors")
-        return
-    print(f"\n[!] Setup finished with {len(failures)} problem(s):")
-    for f in failures:
-        print(f"    - {f}")
+# --- Entry Point -------------------------------------------------------------
 
+def main() -> int:
+    """Run full Termux package and toolchain setup."""
+    initialize_pkg()
+    run("python -m pip install rich colorama==0.4.6", "pip install rich/colorama")
 
+    try:
+        welcome_message()
+    except ImportError:  # in case colorama could not be installed
+        print("[!] colorama could not be installed, skipping banner")
 
-
-
-
-
-
-
+    install_required_apps()
+    install_xmake()
+    install_csharp_ls()
+    install_basedpyright()
+    clean_up()
+    print_summary()
+    return 1 if failures else 0
 
 
 if __name__ == "__main__":

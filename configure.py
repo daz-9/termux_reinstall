@@ -1,12 +1,17 @@
-import subprocess
+#!/usr/bin/env python3
+"""Configure Zsh/Starship, Neovim (AstroNvim/LazyVim + native LSPs), Font/Colors, and Tmux."""
+
 import os
+import re
 import shutil
+import subprocess
 import sys
 
-
-# everything that failed gets collected here and printed at the end
+# Everything that failed gets collected here and printed at the end
 failures: list[str] = []
 
+
+# --- Helpers -----------------------------------------------------------------
 
 def run(cmd: str, desc: str, env: dict | None = None) -> bool:
     """Run a shell command, report failure to the user and keep going. Returns True on success."""
@@ -20,6 +25,7 @@ def run(cmd: str, desc: str, env: dict | None = None) -> bool:
 
 
 def print_summary():
+    """Print a final report of any steps that failed during configuration."""
     if not failures:
         print("\n[+] Configure finished with no errors")
         return
@@ -28,8 +34,10 @@ def print_summary():
         print(f"    - {f}")
 
 
+# --- CLI & Menus -------------------------------------------------------------
+
 def main() -> int:
-    # Flags for non-interactive use
+    """Parse CLI flags or show the interactive configuration menu."""
     args = sys.argv[1:]
     if args:
         dispatch(tuple(arg.lstrip("-") for arg in args))
@@ -42,14 +50,10 @@ def main() -> int:
         ["Zsh", "Neovim", "Font", "Tmux"],
         multi_select=True,
         show_multi_select_hint=True,
-        title="Select what to configure (use space to select, enter to confirm):"
+        title="Select what to configure (use space to select, enter to confirm):",
     )
     menu_entry_indices = terminal_menu.show()
-    #print(menu_entry_indices)
-    #print(terminal_menu.chosen_menu_entries)
-    
 
-    # If no menu entry was selected, exit with code 1
     if not menu_entry_indices:
         print("[!] No menu entry selected. Exiting.")
         return 1
@@ -57,12 +61,15 @@ def main() -> int:
     print_summary()
     return 1 if failures else 0
 
-def neovim_config():
+
+def neovim_config() -> int:
+    """Show a sub-menu to choose between LazyVim and AstroNvim."""
     from simple_term_menu import TerminalMenu
+
     neovim_config_menu = TerminalMenu(
         ["LazyVim", "AstroNvim"],
         multi_select=False,
-        title="Select Neovim config (press enter to confirm):"
+        title="Select Neovim config (press enter to confirm):",
     )
     menu_entry_index = neovim_config_menu.show()
     if menu_entry_index is None:
@@ -71,61 +78,51 @@ def neovim_config():
     return dispatch_neovim_config((neovim_config_menu.chosen_menu_entry,))
 
 
+def _run_handlers(choices: tuple[str, ...], handlers: dict) -> int:
+    """Run each selected handler by name, isolating exceptions so remaining steps still run."""
+    rc = 0
+    for choice in choices:
+        handler = handlers.get(choice.lower())
+        if handler is None:
+            print(f"[!] Invalid choice: {choice!r}")
+            rc = 1
+            continue
+        try:
+            result = handler()
+        except Exception as e:  # never let one step kill the rest
+            print(f"[-] {choice} failed: {e}")
+            failures.append(choice)
+            result = 1
+        if result != 0:
+            rc = result
+    return rc
+
+
 def dispatch(choices: tuple[str, ...]) -> int:
-
-
-    # keys are lowercase so menu entries ("Zsh") and flags ("--zsh") both match
-    handlers = {
-        "zsh":     lambda: configure_zsh(),
+    """Dispatch top-level configuration choices (menu entries or CLI flags)."""
+    # Keys are lowercase so menu entries ("Zsh") and flags ("--zsh") both match
+    return _run_handlers(choices, {
+        "zsh": lambda: configure_zsh(),
         "neovim": lambda: neovim_config(),
         "lazyvim": lambda: configure_vim_lazyvim(),    # flag-only shortcut, skips the nvim menu
         "astronvim": lambda: configure_vim_astrovim(), # flag-only shortcut, skips the nvim menu
         "font": lambda: configure_font(),
         "tmux": lambda: configure_tmux(),
-    }
+    })
 
-    rc = 0
-    for choice in choices:
-        handler = handlers.get(choice.lower())
-        if handler is None:
-            print(f"[!] Invalid choice: {choice!r}")
-            rc = 1
-            continue
-        try:
-            result = handler()
-        except Exception as e:  # never let one step kill the rest
-            print(f"[-] {choice} failed: {e}")
-            failures.append(choice)
-            result = 1
-        if result != 0:
-            rc = result
-    return rc
 
 def dispatch_neovim_config(choices: tuple[str, ...]) -> int:
-    handlers = {
+    """Dispatch Neovim distro selection."""
+    return _run_handlers(choices, {
         "lazyvim": lambda: configure_vim_lazyvim(),
         "astronvim": lambda: configure_vim_astrovim(),
-    }
-
-    rc = 0
-    for choice in choices:
-        handler = handlers.get(choice.lower())
-        if handler is None:
-            print(f"[!] Invalid choice: {choice!r}")
-            rc = 1
-            continue
-        try:
-            result = handler()
-        except Exception as e:  # never let one step kill the rest
-            print(f"[-] {choice} failed: {e}")
-            failures.append(choice)
-            result = 1
-        if result != 0:
-            rc = result
-    return rc
+    })
 
 
-def configure_zsh():
+# --- Zsh & Starship ----------------------------------------------------------
+
+def configure_zsh() -> int:
+    """Install Oh My Zsh, plugins, aliases, CLI tool hooks, and Starship prompt."""
     # no zsh -> oh-my-zsh is pointless, and we must not try to launch/switch to it
     if not shutil.which("zsh"):
         print("[-] zsh is not installed (run Setup first), skipping Oh My Zsh")
@@ -140,7 +137,7 @@ def configure_zsh():
         ok = run(
             "sh -c \"$(curl -fsSL https://raw.githubusercontent.com/ohmyzsh/ohmyzsh/master/tools/install.sh)\" \"\" --unattended",
             "installing Oh My Zsh",
-            env={"RUNZSH": "no", "CHSH": "no"},
+            env={"RUNZSH": "no", "CHSH": "no", "ZSH": omz_dir},
         )
         if not ok:
             return 1  # no omz -> plugins/zshrc edits would be pointless
@@ -161,7 +158,7 @@ ZSH_PLUGIN_REPOS = {
 
 def install_zsh_plugins(omz_dir: str) -> list[str]:
     """Clone the third-party plugins. Returns the ones that are actually present."""
-    custom = os.environ.get("ZSH_CUSTOM", os.path.join(omz_dir, "custom"))
+    custom = os.path.join(omz_dir, "custom")
     present = []
     for name, url in ZSH_PLUGIN_REPOS.items():
         dest = os.path.join(custom, "plugins", name)
@@ -180,7 +177,6 @@ def enable_zsh_plugins(extra: list[str]):
         print("[-] ~/.zshrc not found, can't enable plugins")
         failures.append("enabling zsh plugins (~/.zshrc missing)")
         return
-    import re
     with open(zshrc) as f:
         text = f.read()
     m = re.search(r"^plugins=\(([^)]*)\)", text, re.M)
@@ -331,6 +327,7 @@ def _append_zshrc_block(marker: str, block: str, label: str):
 
 
 def configure_starship():
+    """Write ~/.config/starship.toml with Catppuccin Mocha styling."""
     path = os.path.expanduser("~/.config/starship.toml")
     try:
         os.makedirs(os.path.dirname(path), exist_ok=True)
@@ -343,6 +340,8 @@ def configure_starship():
     if not shutil.which("starship"):
         print("[!] starship not found yet, install starship (run Setup) to enable prompt")
 
+
+# --- Tmux --------------------------------------------------------------------
 
 TMUX_CONF = """# True color & Neovim compatibility
 set -g default-terminal "tmux-256color"
@@ -400,7 +399,8 @@ set -g pane-active-border-style "fg=#89b4fa"
 """
 
 
-def configure_tmux():
+def configure_tmux() -> int:
+    """Write ~/.tmux.conf (backing up any existing file) and reload hints."""
     path = os.path.expanduser("~/.tmux.conf")
     try:
         if os.path.exists(path):
@@ -415,6 +415,8 @@ def configure_tmux():
         print(f"[-] writing ~/.tmux.conf failed: {e}")
         failures.append("writing ~/.tmux.conf")
         return 1
+
+# --- Termux Font & Colors ----------------------------------------------------
 
 TERMUX_COLORS = """# https://github.com/catppuccin/catppuccin (Catppuccin Mocha)
 foreground=#cdd6f4
@@ -444,7 +446,8 @@ color17=#f5e0dc
 """
 
 
-def configure_font():
+def configure_font() -> int:
+    """Download JetBrainsMono Nerd Font and write Catppuccin Mocha terminal colors."""
     termux_dir = os.path.expanduser("~/.termux")
     ok = run("mkdir -p ~/.termux/", "creating ~/.termux")
     # download to a temp file first so a failed download doesn't wipe the current font
@@ -462,7 +465,10 @@ def configure_font():
         run("termux-reload-settings", "termux-reload-settings")
     return 0 if ok else 1
 
+# --- Neovim & Native LSPs ----------------------------------------------------
+
 def _backup_nvim_dirs():
+    """Move existing Neovim config/data/state/cache directories to *.bak."""
     for p in ["~/.config/nvim", "~/.local/share/nvim", "~/.local/state/nvim", "~/.cache/nvim"]:
         p = os.path.expanduser(p)
         if os.path.exists(p):
@@ -616,6 +622,7 @@ return {
 """
 
 def _write_lsp_spec(filename: str, content: str, bin_name: str, missing_hint: str):
+    """Write a Neovim plugin spec to bypass Mason for a Termux-native LSP."""
     path = os.path.expanduser(f"~/.config/nvim/lua/plugins/{filename}")
     try:
         os.makedirs(os.path.dirname(path), exist_ok=True)
@@ -628,24 +635,28 @@ def _write_lsp_spec(filename: str, content: str, bin_name: str, missing_hint: st
     if not (shutil.which(bin_name) or os.path.exists(os.path.expanduser(f"~/.dotnet/tools/{bin_name}"))):
         print(f"[!] {bin_name} not found yet, {missing_hint}")
 
-def configure_vim_lazyvim():
+
+def configure_vim_lazyvim() -> int:
+    """Install LazyVim starter config and wire up Termux-native LSPs."""
     _backup_nvim_dirs()
-    if not run("git clone https://github.com/LazyVim/starter ~/.config/nvim", "cloning LazyVim"): #nvim config
+    if not run("git clone https://github.com/LazyVim/starter ~/.config/nvim", "cloning LazyVim"):
         _restore_nvim_dirs()
         return 1
-    subprocess.run("rm -rf ~/.config/nvim/.git", shell=True) #remove git history
+    subprocess.run("rm -rf ~/.config/nvim/.git", shell=True)
     _write_lsp_spec("clangd.lua", CLANGD_LAZYVIM, "clangd", "install clang (run Setup) for C completion/diagnostics")
     _write_lsp_spec("lua_ls.lua", LUA_LS_LAZYVIM, "lua-language-server", "install lua-language-server (run Setup) for Lua completion/diagnostics")
     _write_lsp_spec("csharp_ls.lua", CSHARP_LS_LAZYVIM, "csharp-ls", "install dotnet-sdk-9.0 + csharp-ls (run Setup) for C# completion/diagnostics")
     _write_lsp_spec("python_lsp.lua", PYTHON_LSP_LAZYVIM, "basedpyright-langserver", "install nodejs + basedpyright + ruff (run Setup) for Python completion/diagnostics")
     return 0
 
-def configure_vim_astrovim():
+
+def configure_vim_astrovim() -> int:
+    """Install AstroNvim template config and wire up Termux-native LSPs."""
     _backup_nvim_dirs()
-    if not run("git clone --depth 1 https://github.com/AstroNvim/template ~/.config/nvim", "cloning AstroNvim"): #nvim config
+    if not run("git clone --depth 1 https://github.com/AstroNvim/template ~/.config/nvim", "cloning AstroNvim"):
         _restore_nvim_dirs()
         return 1
-    subprocess.run("rm -rf ~/.config/nvim/.git", shell=True) #remove git history
+    subprocess.run("rm -rf ~/.config/nvim/.git", shell=True)
     _write_lsp_spec("clangd.lua", CLANGD_ASTRONVIM, "clangd", "install clang (run Setup) for C completion/diagnostics")
     _write_lsp_spec("lua_ls.lua", LUA_LS_ASTRONVIM, "lua-language-server", "install lua-language-server (run Setup) for Lua completion/diagnostics")
     _write_lsp_spec("csharp_ls.lua", CSHARP_LS_ASTRONVIM, "csharp-ls", "install dotnet-sdk-9.0 + csharp-ls (run Setup) for C# completion/diagnostics")

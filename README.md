@@ -93,6 +93,28 @@ python configure.py --zsh --font --tmux --astronvim     # recommended (or --lazy
 
 ---
 
+## 🧪 Testing in a Fake `HOME`
+
+To test `configure.py` safely without modifying your real dotfiles, point `HOME` to a temporary directory:
+
+```sh
+FAKE_HOME=$(mktemp -d)
+HOME="$FAKE_HOME" python3 configure.py --zsh --tmux --font --astronvim
+
+# Re-run to verify idempotency and check zsh syntax
+HOME="$FAKE_HOME" python3 configure.py --zsh
+HOME="$FAKE_HOME" zsh -n "$FAKE_HOME/.zshrc"
+
+rm -rf "$FAKE_HOME"
+```
+
+**Notes from testing:**
+* **Inherited `$ZSH` / `$ZSH_CUSTOM`:** If you run from an active Oh My Zsh session, `$ZSH` is already exported; `configure.py` overrides `ZSH` to `~/.oh-my-zsh` inside the active `HOME` so the installer doesn't abort.
+* **`termux-reload-settings`:** Running `--font` still triggers Termux to reload your *real* `~/.termux/` settings, though all downloaded files (`font.ttf`, `colors.properties`) are written into `$FAKE_HOME/.termux/`.
+* **`csharp-ls` warning:** Because `.dotnet/tools` lives under `$HOME`, `configure.py` prints a harmless `[!] csharp-ls not found yet` notice in a clean fake `HOME` unless `csharp-ls` is on `PATH`.
+
+---
+
 ## 🛠️ Troubleshooting
 
 <details>

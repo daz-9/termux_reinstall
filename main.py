@@ -11,7 +11,7 @@ PY = sys.executable  # the same python running this file
 
 
 def run_script(name: str) -> int:
-    """Run a sibling script by filename. Returns its exit code."""
+    """Run a sibling script by filename and return its exit code."""
     path = os.path.join(HERE, name)
     if not os.path.exists(path):
         print(f"[!] {name} not found next to main.py")
@@ -21,11 +21,10 @@ def run_script(name: str) -> int:
 
 
 def dispatch(choices: tuple[str, ...]) -> int:
-
-
-    # keys are lowercase so menu entries ("Setup") and flags ("--setup") both match
+    """Execute selected sub-scripts ('setup', 'configure') in order."""
+    # Keys are lowercase so menu entries ("Setup") and flags ("--setup") both match
     handlers = {
-        "setup":     lambda: run_script("setup.py"),
+        "setup": lambda: run_script("setup.py"),
         "configure": lambda: run_script("configure.py"),
     }
 
@@ -43,6 +42,7 @@ def dispatch(choices: tuple[str, ...]) -> int:
 
 
 def main() -> int:
+    """Entry point: parse CLI flags or show the interactive Setup/Configure menu."""
     if subprocess.run("python -m pip install simple-term-menu==1.6.6", shell=True).returncode != 0:
         print("[-] Failed to install simple-term-menu, menus won't work (you can still use flags, e.g. --setup)")
 
@@ -50,7 +50,6 @@ def main() -> int:
     args = sys.argv[1:]
     if args:
         return dispatch(tuple(arg.lstrip("-") for arg in args))
-
 
     try:
         from simple_term_menu import TerminalMenu
@@ -62,14 +61,10 @@ def main() -> int:
         ["Setup", "Configure"],
         multi_select=True,
         show_multi_select_hint=True,
-        title="Select what to install (use space to select, enter to confirm):"
+        title="Select what to install (use space to select, enter to confirm):",
     )
     menu_entry_indices = terminal_menu.show()
-    #print(menu_entry_indices)
-    #print(terminal_menu.chosen_menu_entries)
-    
 
-    # If no menu entry was selected, exit with code 1
     if not menu_entry_indices:
         print("[!] No menu entry selected. Exiting.")
         return 1
