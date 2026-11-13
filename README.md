@@ -32,7 +32,7 @@ Installs the packages:
 | C toolchain | `clang`, `lldb`, `gdb`, `make`, `bear`, `xmake` (with custom `br`, `san`, `dbg` plugins & `clangd` templates) |
 | Editor | `neovim`, `lua55`, `luarocks`, `lua-language-server`, `dotnet-sdk-9.0` + `csharp-ls`, `nodejs` + `basedpyright`, `ruff`, `ripgrep`, `fd`, `fzf`, `lazygit` |
 | Shell & CLI | `zsh`, `starship`, `git`, `zip`, `eza`, `yazi`, `zoxide`, `bat`, `tmux`, `man`, `manpages`, `fastfetch`, `termux-api` |
-| GitHub | `openssh`, `gh` |
+| GitHub | `git`, `git-delta`, `openssh`, `gh` |
 
 Then sets **zsh** as the default shell (only if zsh actually installed).
 
@@ -42,10 +42,11 @@ If a step fails, the script prints why, carries on, and lists every failed step 
 
 | Option | What it does |
 |--------|--------------|
-| **Zsh** | Installs [Oh My Zsh](https://ohmyz.sh/), `zsh-autosuggestions` + `zsh-syntax-highlighting` (plus `git`, `colored-man-pages`), wires up `zoxide`/`fzf`/`bat`/`fastfetch` (skipped inside `tmux`/Neovim), sets `.NET` env (`~/.dotnet/tools`, `DOTNET_ROOT`, `DOTNET_ROLL_FORWARD=Major`), configures [Starship](https://starship.rs/) (`~/.config/starship.toml`, with `xmake` & C support), and adds aliases |
-| **Neovim** | Installs [AstroNvim](https://astronvim.com/) *(recommended)* or [LazyVim](https://www.lazyvim.org/). Existing configs are backed up to `*.bak`. Uses Termux's native `clangd`, `lua-language-server`, `csharp-ls`, `basedpyright`, and `ruff` instead of Mason ([clangd#1944](https://github.com/clangd/clangd/issues/1944)) |
+| **Zsh** | Installs [Oh My Zsh](https://ohmyz.sh/), `zsh-autosuggestions` + `zsh-syntax-highlighting` (plus `git`, `colored-man-pages`), wires up `zoxide`/`fzf`/`bat`/`yazi` (`y` wrapper)/`fastfetch` (skipped inside `tmux`/Neovim), sets `.NET` env (`~/.dotnet/tools`, `DOTNET_ROOT`, `DOTNET_ROLL_FORWARD=Major`), configures [Starship](https://starship.rs/) (`starship.toml` with `xmake`, C, Python, etc.), and adds aliases |
+| **Neovim** | Installs [AstroNvim](https://astronvim.com/) *(recommended)* or [LazyVim](https://www.lazyvim.org/). Existing configs are backed up to `*.bak`. Uses Termux's native `clangd`, `lua-language-server`, `csharp-ls`, `basedpyright`, and `ruff` instead of Mason ([clangd#1944](https://github.com/clangd/clangd/issues/1944)), disables Mason auto-installs, fixes Termux italic comment clipping (`termux_cursor.lua`), and includes `tokyonight` + Snacks colorscheme preview |
 | **Font** | Installs JetBrainsMono Nerd Font (`~/.termux/font.ttf`) and Catppuccin Mocha terminal colors (`~/.termux/colors.properties`) |
 | **Tmux** | Writes `~/.tmux.conf` (Catppuccin Mocha bar, mouse support, `Ctrl-a`/`Ctrl-b` prefix, `\|`/`-` splits, `Alt+Arrow` pane switching, `vi` copy mode with Android clipboard via `termux-clipboard-set`) |
+| **Git** | Configures `git-delta` side-by-side diffs with line numbers, `zdiff3` merge conflicts, and `diff.colorMoved` in `~/.gitconfig` |
 
 > [!NOTE]
 > **Neovim distro stability:** On Termux, **AstroNvim is stable** and recommended. **LazyVim tends to crash** on Termux, though the option is still available if you want to test it.
@@ -81,7 +82,7 @@ Skip the menus by passing flags (case-insensitive, any number of them):
 
 ```sh
 python main.py --setup --configure
-python configure.py --zsh --font --tmux --astronvim     # recommended (or --lazyvim / --neovim)
+python configure.py --zsh --font --tmux --git --astronvim     # recommended (or --lazyvim / --neovim)
 ```
 
 ---
@@ -99,7 +100,7 @@ To test `configure.py` safely without modifying your real dotfiles, point `HOME`
 
 ```sh
 FAKE_HOME=$(mktemp -d)
-HOME="$FAKE_HOME" python3 configure.py --zsh --tmux --font --astronvim
+HOME="$FAKE_HOME" python3 configure.py --zsh --tmux --font --git --astronvim
 
 # Re-run to verify idempotency and check zsh syntax
 HOME="$FAKE_HOME" python3 configure.py --zsh

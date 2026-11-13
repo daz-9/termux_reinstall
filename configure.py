@@ -9,6 +9,7 @@ import sys
 
 # Everything that failed gets collected here and printed at the end
 failures: list[str] = []
+HERE = os.path.dirname(os.path.abspath(__file__))
 
 
 # --- Helpers -----------------------------------------------------------------
@@ -47,7 +48,7 @@ def main() -> int:
     from simple_term_menu import TerminalMenu
 
     terminal_menu = TerminalMenu(
-        ["Zsh", "Neovim", "Font", "Tmux"],
+        ["Zsh", "Neovim", "Font", "Tmux", "Git"],
         multi_select=True,
         show_multi_select_hint=True,
         title="Select what to configure (use space to select, enter to confirm):",
@@ -108,6 +109,7 @@ def dispatch(choices: tuple[str, ...]) -> int:
         "astronvim": lambda: configure_vim_astrovim(), # flag-only shortcut, skips the nvim menu
         "font": lambda: configure_font(),
         "tmux": lambda: configure_tmux(),
+        "git": lambda: configure_git(),
     })
 
 
@@ -235,6 +237,16 @@ if command -v bat >/dev/null 2>&1; then
   export MANPAGER="sh -c 'col -bx | bat -l man -p'"
 fi
 
+if command -v yazi >/dev/null 2>&1; then
+  function y() {{
+    local tmp cwd; tmp="$(mktemp -t "yazi-cwd.XXXXXX")"
+    command yazi "$@" --cwd-file="$tmp"
+    IFS= read -r -d '' cwd < "$tmp"
+    [ "$cwd" != "$PWD" ] && [ -d "$cwd" ] && builtin cd -- "$cwd" || builtin true
+    command rm -f -- "$tmp"
+  }}
+fi
+
 if [ -d "$HOME/.dotnet/tools" ]; then
   export PATH="$HOME/.dotnet/tools:$PATH"
   export DOTNET_ROOT="${{PREFIX:-/data/data/com.termux/files/usr}}/lib/dotnet"
@@ -255,60 +267,6 @@ fi
 # <<< starship prompt <<<
 """
 
-STARSHIP_CONFIG = """# Starship configuration matching Catppuccin Mocha & Termux screen width
-
-format = \"\"\"
-$directory\\
-$git_branch\\
-$git_status\\
-$c\\
-$xmake\\
-$fill\\
-$cmd_duration\\
-$line_break\\
-$character\"\"\"
-
-# Don't print empty line between prompts on mobile screen
-add_newline = false
-
-[directory]
-style = "bold lavender"
-truncation_length = 3
-truncate_to_repo = true
-read_only = " 󰌾"
-
-[git_branch]
-symbol = " "
-style = "bold mauve"
-
-[git_status]
-style = "bold red"
-format = '([$all_status$ahead_behind]($style) )'
-
-[c]
-symbol = " "
-style = "bold sapphire"
-format = "via [$symbol($version )]($style)"
-
-[xmake]
-symbol = " "
-style = "bold sapphire"
-format = "via [$symbol($version )]($style)"
-
-[cmd_duration]
-min_time = 2_000
-style = "bold yellow"
-format = "took [$duration]($style)"
-
-[fill]
-symbol = " "
-
-[character]
-success_symbol = "[❯](bold green)"
-error_symbol = "[❯](bold red)"
-vicmd_symbol = "[❮](bold peach)"
-"""
-
 
 def _append_zshrc_block(marker: str, block: str, label: str):
     """Append a marked config block to ~/.zshrc once (re-running doesn't duplicate it)."""
@@ -327,12 +285,12 @@ def _append_zshrc_block(marker: str, block: str, label: str):
 
 
 def configure_starship():
-    """Write ~/.config/starship.toml with Catppuccin Mocha styling."""
+    """Copy starship.toml from the repo into ~/.config/starship.toml."""
+    src = os.path.join(HERE, "starship.toml")
     path = os.path.expanduser("~/.config/starship.toml")
     try:
         os.makedirs(os.path.dirname(path), exist_ok=True)
-        with open(path, "w") as f:
-            f.write(STARSHIP_CONFIG)
+        shutil.copyfile(src, path)
         print("[+] wrote ~/.config/starship.toml")
     except OSError as e:
         print(f"[-] writing starship.toml failed: {e}")
@@ -465,6 +423,28 @@ def configure_font() -> int:
         run("termux-reload-settings", "termux-reload-settings")
     return 0 if ok else 1
 
+# --- Git (delta & diff/merge) ------------------------------------------------
+
+def configure_git() -> int:
+    """Configure git-delta side-by-side diffs and zdiff3 conflict markers safely."""
+    settings = [
+        ("core.pager", "delta"),
+        ("interactive.diffFilter", "delta --color-only"),
+        ("delta.navigate", "true"),
+        ("delta.dark", "true"),
+        ("delta.side-by-side", "true"),
+        ("delta.line-numbers", "true"),
+        ("merge.conflictstyle", "zdiff3"),
+        ("diff.colorMoved", "default"),
+    ]
+    ok = True
+    for key, val in settings:
+        ok = run(f'git config --global "{key}" "{val}"', f"setting git {key}") and ok
+    if not shutil.which("delta"):
+        print("[!] delta not found yet, install git-delta (run Setup) to use it as git pager")
+    return 0 if ok else 1
+
+
 # --- Neovim & Native LSPs ----------------------------------------------------
 
 def _backup_nvim_dirs():
@@ -545,6 +525,7 @@ return {
       servers = {
         csharp_ls = {
           mason = false,
+          cmd = { vim.fn.expand("~/.dotnet/tools/csharp-ls") },
           cmd_env = {
             DOTNET_ROOT = (vim.env.PREFIX or "/data/data/com.termux/files/usr") .. "/lib/dotnet",
             DOTNET_ROLL_FORWARD = "Major",
@@ -566,6 +547,7 @@ return {
     opts.servers = vim.list_extend(opts.servers or {}, { "csharp_ls" })
     opts.config = vim.tbl_deep_extend("force", opts.config or {}, {
       csharp_ls = {
+        cmd = { vim.fn.expand("~/.dotnet/tools/csharp-ls") },
         cmd_env = {
           DOTNET_ROOT = (vim.env.PREFIX or "/data/data/com.termux/files/usr") .. "/lib/dotnet",
           DOTNET_ROLL_FORWARD = "Major",
@@ -621,6 +603,153 @@ return {
 }
 """
 
+MASON_DISABLE_ASTRONVIM = """-- Disable automatic Mason tool installation on Termux/Android,
+-- since Mason's prebuilt glibc binaries are unsupported here.
+---@type LazySpec
+return {
+  {
+    "WhoIsSethDaniel/mason-tool-installer.nvim",
+    opts = {
+      run_on_start = false,
+      auto_update = false,
+    },
+  },
+}
+"""
+
+TERMUX_CURSOR_LAZYVIM = """-- Fix Termux italic glyph clipping (synthetic slant leans into the cursor cell)
+-- and keep Normal (blinking block) vs Insert (vertical bar) clearly distinct.
+vim.opt.guicursor = "n-v-c-sm:block-blinkwait300-blinkoff250-blinkon400,i-ci-ve:ver25,r-cr-o:hor20"
+vim.api.nvim_create_autocmd({ "ColorScheme", "VimEnter" }, {
+  desc = "Disable italic on comments so Termux doesn't clip glyphs at the cursor",
+  callback = function()
+    for _, group in ipairs({ "Comment", "@comment", "@comment.documentation", "SpecialComment" }) do
+      local ok, hl = pcall(vim.api.nvim_get_hl, 0, { name = group, link = false })
+      if ok and hl and (hl.italic or (hl.cterm and hl.cterm.italic)) then
+        hl.italic = false
+        if hl.cterm then hl.cterm.italic = false end
+        vim.api.nvim_set_hl(0, group, hl)
+      end
+    end
+  end,
+})
+return {}
+"""
+
+TERMUX_CURSOR_ASTRONVIM = """-- Fix Termux italic glyph clipping (synthetic slant leans into the cursor cell)
+-- and keep Normal (block) vs Insert (vertical bar) clearly distinct.
+local function strip_comment_italics()
+  for _, group in ipairs({ "Comment", "@comment", "@comment.documentation", "SpecialComment" }) do
+    local ok, hl = pcall(vim.api.nvim_get_hl, 0, { name = group, link = false })
+    if ok and hl and (hl.italic or (hl.cterm and hl.cterm.italic)) then
+      hl.italic = false
+      if hl.cterm then hl.cterm.italic = false end
+      vim.api.nvim_set_hl(0, group, hl)
+    end
+  end
+end
+
+---@type LazySpec
+return {
+  "AstroNvim/astrocore",
+  ---@type AstroCoreOpts
+  opts = {
+    options = {
+      opt = {
+        guicursor = "n-v-c-sm:block-blinkwait300-blinkoff250-blinkon400,i-ci-ve:ver25,r-cr-o:hor20",
+      },
+    },
+    autocmds = {
+      termux_no_comment_italic = {
+        {
+          event = { "ColorScheme", "VimEnter" },
+          desc = "Disable italic on comments so Termux doesn't clip glyphs at the cursor",
+          callback = strip_comment_italics,
+        },
+      },
+    },
+  },
+}
+"""
+
+COMMUNITY_ASTRONVIM = """-- AstroCommunity: import any community modules here
+-- We import this file in `lazy_setup.lua` before the `plugins/` folder.
+-- This guarantees that the specs are processed before any user plugins.
+
+---@type LazySpec
+return {
+  "AstroNvim/astrocommunity",
+  { import = "astrocommunity.pack.lua" },
+  { import = "astrocommunity.colorscheme.tokyonight-nvim" },
+}
+"""
+
+SNACKS_PREVIEW_ASTRONVIM = """---@type LazySpec
+return {
+  "folke/snacks.nvim",
+  opts = function(_, opts)
+    local sample = {
+      "-- Colorscheme Showcase: Lua Syntax & Highlights",
+      "local M = {}",
+      "",
+      "---@class ThemeConfig",
+      "---@field style string",
+      "---@field transparent boolean",
+      "local defaults = {",
+      '  style = "night",',
+      "  transparent = false,",
+      "  styles = { comments = { italic = true }, keywords = { bold = true } },",
+      "  max_items = 42,",
+      "}",
+      "",
+      "---Compute a greeting and status summary",
+      "---@param name string",
+      "---@param count integer",
+      "---@return string",
+      "function M.greet(name, count)",
+      "  if count <= 0 then",
+      '    return string.format("Hello, %s! (no items)", name)',
+      "  end",
+      "  for i = 1, math.min(count, defaults.max_items) do",
+      "    if i % 15 == 0 then",
+      '      vim.notify("Milestone reached: " .. tostring(i), vim.log.levels.INFO)',
+      "    end",
+      "  end",
+      '  return string.format("Welcome, %s (%d items)", name, count)',
+      "end",
+      "",
+      "return M",
+    }
+
+    opts.picker = vim.tbl_deep_extend("force", opts.picker or {}, {
+      sources = {
+        colorschemes = {
+          preview = function(ctx)
+            if not ctx.preview.state.colorscheme then
+              ctx.preview.state.colorscheme = vim.g.colors_name or "default"
+              ctx.preview.state.background = vim.o.background
+              ctx.preview.win:on("WinClosed", function()
+                vim.schedule(function()
+                  if not ctx.preview.state.colorscheme then return end
+                  vim.cmd("colorscheme " .. ctx.preview.state.colorscheme)
+                  vim.o.background = ctx.preview.state.background
+                end)
+              end, { win = true })
+            end
+            vim.schedule(function() vim.cmd("colorscheme " .. ctx.item.text) end)
+
+            ctx.preview:reset()
+            ctx.preview:set_title(ctx.item.text)
+            ctx.preview:set_lines(sample)
+            ctx.preview:highlight { ft = "lua" }
+          end,
+        },
+      },
+    })
+  end,
+}
+"""
+
 def _write_lsp_spec(filename: str, content: str, bin_name: str, missing_hint: str):
     """Write a Neovim plugin spec to bypass Mason for a Termux-native LSP."""
     path = os.path.expanduser(f"~/.config/nvim/lua/plugins/{filename}")
@@ -647,6 +776,7 @@ def configure_vim_lazyvim() -> int:
     _write_lsp_spec("lua_ls.lua", LUA_LS_LAZYVIM, "lua-language-server", "install lua-language-server (run Setup) for Lua completion/diagnostics")
     _write_lsp_spec("csharp_ls.lua", CSHARP_LS_LAZYVIM, "csharp-ls", "install dotnet-sdk-9.0 + csharp-ls (run Setup) for C# completion/diagnostics")
     _write_lsp_spec("python_lsp.lua", PYTHON_LSP_LAZYVIM, "basedpyright-langserver", "install nodejs + basedpyright + ruff (run Setup) for Python completion/diagnostics")
+    _write_lsp_spec("termux_cursor.lua", TERMUX_CURSOR_LAZYVIM, "nvim", "")
     return 0
 
 
@@ -661,6 +791,17 @@ def configure_vim_astrovim() -> int:
     _write_lsp_spec("lua_ls.lua", LUA_LS_ASTRONVIM, "lua-language-server", "install lua-language-server (run Setup) for Lua completion/diagnostics")
     _write_lsp_spec("csharp_ls.lua", CSHARP_LS_ASTRONVIM, "csharp-ls", "install dotnet-sdk-9.0 + csharp-ls (run Setup) for C# completion/diagnostics")
     _write_lsp_spec("python_lsp.lua", PYTHON_LSP_ASTRONVIM, "basedpyright-langserver", "install nodejs + basedpyright + ruff (run Setup) for Python completion/diagnostics")
+    _write_lsp_spec("mason.lua", MASON_DISABLE_ASTRONVIM, "nvim", "")
+    _write_lsp_spec("termux_cursor.lua", TERMUX_CURSOR_ASTRONVIM, "nvim", "")
+    _write_lsp_spec("snacks.lua", SNACKS_PREVIEW_ASTRONVIM, "nvim", "")
+    try:
+        comm_path = os.path.expanduser("~/.config/nvim/lua/community.lua")
+        with open(comm_path, "w") as f:
+            f.write(COMMUNITY_ASTRONVIM)
+        print("[+] wrote ~/.config/nvim/lua/community.lua")
+    except OSError as e:
+        print(f"[-] writing community.lua failed: {e}")
+        failures.append("writing community.lua")
     return 0
 
 

@@ -69,8 +69,8 @@ def install_required_apps():
         # Neovim + pickers + native LSP runtimes
         "neovim", "lua55", "luarocks", "lua-language-server", "dotnet-sdk-9.0",
         "nodejs", "ruff", "ripgrep", "fd", "fzf", "lazygit",
-        # GitHub
-        "git", "openssh", "gh",
+        # GitHub / Git
+        "git", "git-delta", "openssh", "gh",
     ]
     apps_to_be_installed = list(dict.fromkeys(apps_to_be_installed))  # dedupe, keep order
     apps_to_be_installed_str = " ".join(apps_to_be_installed)
