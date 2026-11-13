@@ -37,6 +37,8 @@ def main() -> int:
 
     install_required_apps()
     install_xmake()
+    install_csharp_ls()
+    install_basedpyright()
 
     clean_up()
 
@@ -73,8 +75,8 @@ def install_required_apps():
         "fastfetch", "zip", "git", "zsh", "starship", "eza", "yazi", "zoxide", "bat", "tmux", "man", "manpages", "termux-api",
         # C toolchain
         "clang", "lldb", "gdb", "make", "bear",
-        # neovim + what LazyVim needs for search/pickers
-        "neovim", "lua55", "luarocks", "ripgrep", "fd", "fzf", "lazygit",
+        # neovim + what LazyVim/AstroNvim need for search/pickers/LSP
+        "neovim", "lua55", "luarocks", "lua-language-server", "dotnet-sdk-9.0", "nodejs", "ruff", "ripgrep", "fd", "fzf", "lazygit",
         # github
         "git", "openssh", "gh",
     ]
@@ -210,6 +212,31 @@ def install_xmake():
         except OSError as e:
             print(f"[-] installing xmake plugin {name} failed: {e}")
             failures.append(f"installing xmake {name} plugin")
+
+
+def install_csharp_ls():
+    tool_bin = os.path.expanduser("~/.dotnet/tools/csharp-ls")
+    if shutil.which("csharp-ls") or os.path.exists(tool_bin):
+        print("[+] csharp-ls already installed, skipping")
+        return
+    if not shutil.which("dotnet"):
+        print("[-] dotnet not found, skipping csharp-ls install")
+        failures.append("csharp-ls skipped: dotnet not installed")
+        return
+    print("[*] csharp-ls not found, installing via dotnet tool...")
+    run("dotnet tool install --global csharp-ls --version 0.16.0", "installing csharp-ls")
+
+
+def install_basedpyright():
+    if shutil.which("basedpyright-langserver"):
+        print("[+] basedpyright already installed, skipping")
+        return
+    if not shutil.which("npm"):
+        print("[-] npm not found, skipping basedpyright install")
+        failures.append("basedpyright skipped: npm not installed")
+        return
+    print("[*] basedpyright not found, installing via npm...")
+    run("npm install -g basedpyright", "installing basedpyright")
 
 
 def clean_up():

@@ -239,6 +239,12 @@ if command -v bat >/dev/null 2>&1; then
   export MANPAGER="sh -c 'col -bx | bat -l man -p'"
 fi
 
+if [ -d "$HOME/.dotnet/tools" ]; then
+  export PATH="$HOME/.dotnet/tools:$PATH"
+  export DOTNET_ROOT="${{PREFIX:-/data/data/com.termux/files/usr}}/lib/dotnet"
+  export DOTNET_ROLL_FORWARD=Major
+fi
+
 # Run fastfetch only in top-level interactive shells (not inside tmux splits or Neovim)
 [[ -z "$TMUX" && -z "$NVIM" ]] && command -v fastfetch >/dev/null 2>&1 && fastfetch
 # <<< CLI tools (zoxide, fzf, bat) <<<
@@ -502,18 +508,125 @@ return {
 }
 """
 
-def _write_clangd_spec(content: str):
-    path = os.path.expanduser("~/.config/nvim/lua/plugins/clangd.lua")
+LUA_LS_LAZYVIM = """-- Use Termux's lua-language-server instead of Mason's.
+-- Mason's prebuilt binary is not built for Android/Termux.
+return {
+  {
+    "neovim/nvim-lspconfig",
+    opts = { servers = { lua_ls = { mason = false } } },
+  },
+}
+"""
+
+LUA_LS_ASTRONVIM = """-- Use Termux's lua-language-server instead of Mason's.
+-- Mason's prebuilt binary is not built for Android/Termux.
+---@type LazySpec
+return {
+  "AstroNvim/astrolsp",
+  ---@type AstroLSPOpts
+  opts = function(_, opts)
+    opts.servers = vim.list_extend(opts.servers or {}, { "lua_ls" })
+  end,
+}
+"""
+
+CSHARP_LS_LAZYVIM = """-- Use Termux's csharp-ls (installed via `dotnet tool install --global csharp-ls --version 0.16.0`)
+-- instead of Mason's, since Mason's prebuilt binaries target glibc Linux.
+return {
+  {
+    "neovim/nvim-lspconfig",
+    opts = {
+      servers = {
+        csharp_ls = {
+          mason = false,
+          cmd_env = {
+            DOTNET_ROOT = (vim.env.PREFIX or "/data/data/com.termux/files/usr") .. "/lib/dotnet",
+            DOTNET_ROLL_FORWARD = "Major",
+          },
+        },
+      },
+    },
+  },
+}
+"""
+
+CSHARP_LS_ASTRONVIM = """-- Use Termux's csharp-ls (installed via `dotnet tool install --global csharp-ls --version 0.16.0`)
+-- instead of Mason's, since Mason's prebuilt binaries target glibc Linux.
+---@type LazySpec
+return {
+  "AstroNvim/astrolsp",
+  ---@type AstroLSPOpts
+  opts = function(_, opts)
+    opts.servers = vim.list_extend(opts.servers or {}, { "csharp_ls" })
+    opts.config = vim.tbl_deep_extend("force", opts.config or {}, {
+      csharp_ls = {
+        cmd_env = {
+          DOTNET_ROOT = (vim.env.PREFIX or "/data/data/com.termux/files/usr") .. "/lib/dotnet",
+          DOTNET_ROLL_FORWARD = "Major",
+        },
+      },
+    })
+  end,
+}
+"""
+
+PYTHON_LSP_LAZYVIM = """-- Use Termux's native basedpyright + ruff instead of Mason.
+return {
+  {
+    "neovim/nvim-lspconfig",
+    opts = {
+      servers = {
+        basedpyright = {
+          mason = false,
+          settings = {
+            basedpyright = {
+              analysis = {
+                typeCheckingMode = "standard",
+              },
+            },
+          },
+        },
+        ruff = { mason = false },
+      },
+    },
+  },
+}
+"""
+
+PYTHON_LSP_ASTRONVIM = """-- Use Termux's native basedpyright + ruff instead of Mason.
+---@type LazySpec
+return {
+  "AstroNvim/astrolsp",
+  ---@type AstroLSPOpts
+  opts = function(_, opts)
+    opts.servers = vim.list_extend(opts.servers or {}, { "basedpyright", "ruff" })
+    opts.config = vim.tbl_deep_extend("force", opts.config or {}, {
+      basedpyright = {
+        settings = {
+          basedpyright = {
+            analysis = {
+              typeCheckingMode = "standard",
+            },
+          },
+        },
+      },
+    })
+  end,
+}
+"""
+
+def _write_lsp_spec(filename: str, content: str, bin_name: str, missing_hint: str):
+    path = os.path.expanduser(f"~/.config/nvim/lua/plugins/{filename}")
     try:
         os.makedirs(os.path.dirname(path), exist_ok=True)
         with open(path, "w") as f:
             f.write(content)
-        print("[+] Neovim set to use system clangd")
+        print(f"[+] Neovim set to use system {bin_name}")
     except OSError as e:
-        print(f"[-] writing clangd config failed: {e}")
-        failures.append("writing clangd config")
-    if not shutil.which("clangd"):
-        print("[!] clangd not found yet, install clang (run Setup) for C completion/diagnostics")
+        print(f"[-] writing {filename} config failed: {e}")
+        failures.append(f"writing {filename} config")
+    if not (shutil.which(bin_name) or os.path.exists(os.path.expanduser(f"~/.dotnet/tools/{bin_name}"))):
+        print(f"[!] {bin_name} not found yet, {missing_hint}")
 
 def configure_vim_lazyvim():
     _backup_nvim_dirs()
@@ -521,7 +634,10 @@ def configure_vim_lazyvim():
         _restore_nvim_dirs()
         return 1
     subprocess.run("rm -rf ~/.config/nvim/.git", shell=True) #remove git history
-    _write_clangd_spec(CLANGD_LAZYVIM)
+    _write_lsp_spec("clangd.lua", CLANGD_LAZYVIM, "clangd", "install clang (run Setup) for C completion/diagnostics")
+    _write_lsp_spec("lua_ls.lua", LUA_LS_LAZYVIM, "lua-language-server", "install lua-language-server (run Setup) for Lua completion/diagnostics")
+    _write_lsp_spec("csharp_ls.lua", CSHARP_LS_LAZYVIM, "csharp-ls", "install dotnet-sdk-9.0 + csharp-ls (run Setup) for C# completion/diagnostics")
+    _write_lsp_spec("python_lsp.lua", PYTHON_LSP_LAZYVIM, "basedpyright-langserver", "install nodejs + basedpyright + ruff (run Setup) for Python completion/diagnostics")
     return 0
 
 def configure_vim_astrovim():
@@ -530,7 +646,10 @@ def configure_vim_astrovim():
         _restore_nvim_dirs()
         return 1
     subprocess.run("rm -rf ~/.config/nvim/.git", shell=True) #remove git history
-    _write_clangd_spec(CLANGD_ASTRONVIM)
+    _write_lsp_spec("clangd.lua", CLANGD_ASTRONVIM, "clangd", "install clang (run Setup) for C completion/diagnostics")
+    _write_lsp_spec("lua_ls.lua", LUA_LS_ASTRONVIM, "lua-language-server", "install lua-language-server (run Setup) for Lua completion/diagnostics")
+    _write_lsp_spec("csharp_ls.lua", CSHARP_LS_ASTRONVIM, "csharp-ls", "install dotnet-sdk-9.0 + csharp-ls (run Setup) for C# completion/diagnostics")
+    _write_lsp_spec("python_lsp.lua", PYTHON_LSP_ASTRONVIM, "basedpyright-langserver", "install nodejs + basedpyright + ruff (run Setup) for Python completion/diagnostics")
     return 0
 
 
