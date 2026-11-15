@@ -398,7 +398,7 @@ TERMUX_PROPERTIES = {
     "hide-soft-keyboard-on-startup": "true",
     "volume-keys": "volume",
     "extra-keys": "[]",
-    "disable-hardware-keyboard-shortcuts": "true",
+    "disable-hardware-keyboard-shortcuts": "false",
     "bell-character": "ignore",
     "back-key": "escape",
 }
