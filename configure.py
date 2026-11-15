@@ -238,22 +238,6 @@ if command -v bat >/dev/null 2>&1; then
   export MANPAGER="sh -c 'col -bx | bat -l man -p'"
 fi
 
-if command -v yazi >/dev/null 2>&1; then
-  function y() {{
-    local tmp cwd; tmp="$(mktemp -t "yazi-cwd.XXXXXX")"
-    command yazi "$@" --cwd-file="$tmp"
-    IFS= read -r -d '' cwd < "$tmp"
-    [ "$cwd" != "$PWD" ] && [ -d "$cwd" ] && builtin cd -- "$cwd" || builtin true
-    command rm -f -- "$tmp"
-  }}
-fi
-
-if [ -d "$HOME/.dotnet/tools" ]; then
-  export PATH="$HOME/.dotnet/tools:$PATH"
-  export DOTNET_ROOT="${{PREFIX:-/data/data/com.termux/files/usr}}/lib/dotnet"
-  export DOTNET_ROLL_FORWARD=Major
-fi
-
 # Run fastfetch only in top-level interactive shells (not inside tmux splits or Neovim)
 [[ -z "$TMUX" && -z "$NVIM" ]] && command -v fastfetch >/dev/null 2>&1 && fastfetch
 # <<< CLI tools (zoxide, fzf, bat) <<<
@@ -593,48 +577,6 @@ return {
 }
 """
 
-CSHARP_LS_LAZYVIM = """-- Use Termux's csharp-ls (installed via `dotnet tool install --global csharp-ls --version 0.16.0`)
--- instead of Mason's, since Mason's prebuilt binaries target glibc Linux.
-return {
-  {
-    "neovim/nvim-lspconfig",
-    opts = {
-      servers = {
-        csharp_ls = {
-          mason = false,
-          cmd = { vim.fn.expand("~/.dotnet/tools/csharp-ls") },
-          cmd_env = {
-            DOTNET_ROOT = (vim.env.PREFIX or "/data/data/com.termux/files/usr") .. "/lib/dotnet",
-            DOTNET_ROLL_FORWARD = "Major",
-          },
-        },
-      },
-    },
-  },
-}
-"""
-
-CSHARP_LS_ASTRONVIM = """-- Use Termux's csharp-ls (installed via `dotnet tool install --global csharp-ls --version 0.16.0`)
--- instead of Mason's, since Mason's prebuilt binaries target glibc Linux.
----@type LazySpec
-return {
-  "AstroNvim/astrolsp",
-  ---@type AstroLSPOpts
-  opts = function(_, opts)
-    opts.servers = vim.list_extend(opts.servers or {}, { "csharp_ls" })
-    opts.config = vim.tbl_deep_extend("force", opts.config or {}, {
-      csharp_ls = {
-        cmd = { vim.fn.expand("~/.dotnet/tools/csharp-ls") },
-        cmd_env = {
-          DOTNET_ROOT = (vim.env.PREFIX or "/data/data/com.termux/files/usr") .. "/lib/dotnet",
-          DOTNET_ROLL_FORWARD = "Major",
-        },
-      },
-    })
-  end,
-}
-"""
-
 PYTHON_LSP_LAZYVIM = """-- Use Termux's native basedpyright + ruff instead of Mason.
 return {
   {
@@ -851,7 +793,6 @@ def configure_vim_lazyvim() -> int:
     subprocess.run("rm -rf ~/.config/nvim/.git", shell=True)
     _write_lsp_spec("clangd.lua", CLANGD_LAZYVIM, "clangd", "install clang (run Setup) for C completion/diagnostics")
     _write_lsp_spec("lua_ls.lua", LUA_LS_LAZYVIM, "lua-language-server", "install lua-language-server (run Setup) for Lua completion/diagnostics")
-    _write_lsp_spec("csharp_ls.lua", CSHARP_LS_LAZYVIM, "csharp-ls", "install dotnet-sdk-9.0 + csharp-ls (run Setup) for C# completion/diagnostics")
     _write_lsp_spec("python_lsp.lua", PYTHON_LSP_LAZYVIM, "basedpyright-langserver", "install nodejs + basedpyright + ruff (run Setup) for Python completion/diagnostics")
     _write_lsp_spec("termux_cursor.lua", TERMUX_CURSOR_LAZYVIM, "nvim", "")
     return 0
@@ -866,7 +807,6 @@ def configure_vim_astrovim() -> int:
     subprocess.run("rm -rf ~/.config/nvim/.git", shell=True)
     _write_lsp_spec("clangd.lua", CLANGD_ASTRONVIM, "clangd", "install clang (run Setup) for C completion/diagnostics")
     _write_lsp_spec("lua_ls.lua", LUA_LS_ASTRONVIM, "lua-language-server", "install lua-language-server (run Setup) for Lua completion/diagnostics")
-    _write_lsp_spec("csharp_ls.lua", CSHARP_LS_ASTRONVIM, "csharp-ls", "install dotnet-sdk-9.0 + csharp-ls (run Setup) for C# completion/diagnostics")
     _write_lsp_spec("python_lsp.lua", PYTHON_LSP_ASTRONVIM, "basedpyright-langserver", "install nodejs + basedpyright + ruff (run Setup) for Python completion/diagnostics")
     _write_lsp_spec("mason.lua", MASON_DISABLE_ASTRONVIM, "nvim", "")
     _write_lsp_spec("termux_cursor.lua", TERMUX_CURSOR_ASTRONVIM, "nvim", "")

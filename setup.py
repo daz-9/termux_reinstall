@@ -57,18 +57,16 @@ def initialize_pkg():
 
 
 def install_required_apps():
-    """Install core CLI, C/C++ toolchain, Neovim, and GitHub packages."""
-    run("pkg install tur-repo -y", "installing tur-repo")
-
+    """Install essential CLI, C/C++ toolchain, Neovim, and GitHub packages."""
     apps_to_be_installed = [
         # Base / shell
-        "fastfetch", "zip", "git", "zsh", "starship", "eza", "yazi", "zoxide",
-        "bat", "glow", "tmux", "man", "manpages", "termux-api",
-        # C/C++ & Rust toolchains
-        "clang", "lldb", "gdb", "make", "bear", "rust",
+        "fastfetch", "git", "zsh", "starship", "eza", "zoxide",
+        "bat", "tmux", "termux-api",
+        # C/C++ toolchain
+        "clang", "lldb", "make",
         # Neovim + pickers + native LSP runtimes
         "neovim", "lua55", "luarocks", "lua-language-server", "tree-sitter",
-        "dotnet-sdk-9.0", "nodejs", "ruff", "ripgrep", "fd", "fzf", "lazygit",
+        "nodejs", "ruff", "ripgrep", "fd", "fzf", "lazygit",
         # GitHub / Git
         "git", "git-delta", "openssh", "gh",
     ]
@@ -209,20 +207,6 @@ def install_xmake():
             failures.append(f"installing xmake {name} plugin")
 
 
-def install_csharp_ls():
-    """Install csharp-ls 0.16.0 as a .NET global tool (compatible with Termux .NET 9)."""
-    tool_bin = os.path.expanduser("~/.dotnet/tools/csharp-ls")
-    if shutil.which("csharp-ls") or os.path.exists(tool_bin):
-        print("[+] csharp-ls already installed, skipping")
-        return
-    if not shutil.which("dotnet"):
-        print("[-] dotnet not found, skipping csharp-ls install")
-        failures.append("csharp-ls skipped: dotnet not installed")
-        return
-    print("[*] csharp-ls not found, installing via dotnet tool...")
-    run("dotnet tool install --global csharp-ls --version 0.16.0", "installing csharp-ls")
-
-
 def install_basedpyright():
     """Install basedpyright globally via npm for Python type checking in Neovim."""
     if shutil.which("basedpyright-langserver"):
@@ -234,15 +218,6 @@ def install_basedpyright():
         return
     print("[*] basedpyright not found, installing via npm...")
     run("npm install -g basedpyright", "installing basedpyright")
-
-
-def install_conan():
-    """Install Conan C/C++ package manager via pip."""
-    if shutil.which("conan"):
-        print("[+] conan already installed, skipping")
-        return
-    print("[*] conan not found, installing via pip...")
-    run("python -m pip install conan", "installing conan")
 
 
 def clean_up():
@@ -270,9 +245,7 @@ def main() -> int:
 
     install_required_apps()
     install_xmake()
-    install_csharp_ls()
     install_basedpyright()
-    install_conan()
     clean_up()
     print_summary()
     return 1 if failures else 0
