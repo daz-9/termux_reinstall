@@ -17,7 +17,7 @@ Turns a fresh Termux install into a **C/C++ & Python dev environment** (with C/C
 Paste this into a fresh Termux session:
 
 ```sh
-pkg update && pkg upgrade -y && pkg install git jp2a python-pip wget -y && git clone -b testing https://github.com/daz-9/termux_reinstall && cd termux_reinstall && python3 main.py
+pkg update && pkg upgrade -y && pkg install git jp2a ncurses-utils python-pip wget -y && git clone -b testing https://github.com/daz-9/termux_reinstall && cd termux_reinstall && python3 main.py
 ```
 
 Use <kbd>Space</kbd> to select items in the menus and <kbd>Enter</kbd> to confirm.
@@ -45,9 +45,19 @@ If a step fails, the script prints why, carries on, and lists every failed step 
 
 | Option | What it does |
 |--------|--------------|
+<<<<<<< HEAD
 | **Zsh** | Installs [Oh My Zsh](https://ohmyz.sh/), `zsh-autosuggestions` + `zsh-syntax-highlighting` (plus `git`, `colored-man-pages`), wires up `zoxide`/`fzf`/`bat`/`fastfetch` (skipped inside `tmux`/Neovim), configures [Starship](https://starship.rs/) (`starship.toml` with `xmake`, C, Python, etc.), and adds aliases |
 | **Neovim** | Installs [AstroNvim](https://astronvim.com/) *(recommended)* or [LazyVim](https://www.lazyvim.org/). Existing configs are backed up to `*.bak`. Uses Termux's native `clangd`, `lua-language-server`, `basedpyright`, and `ruff` instead of Mason ([clangd#1944](https://github.com/clangd/clangd/issues/1944)), disables Mason auto-installs, fixes Termux italic comment clipping (`termux_cursor.lua`), and includes `tokyonight` + Snacks colorscheme preview |
 | **Font** | Installs JetBrainsMono Nerd Font (`~/.termux/font.ttf`), Catppuccin Mocha colors (`~/.termux/colors.properties`), and Termux app tweaks (`~/.termux/termux.properties`: `bell-character = ignore`, `hide-soft-keyboard-on-startup`, `volume-keys = volume`, `disable-hardware-keyboard-shortcuts`, `back-key=escape`) |
+||||||| 860bb61
+| **Zsh** | Installs [Oh My Zsh](https://ohmyz.sh/), `zsh-autosuggestions` + `zsh-syntax-highlighting` (plus `git`, `colored-man-pages`), wires up `zoxide`/`fzf`/`bat`/`yazi` (`y` wrapper)/`fastfetch` (skipped inside `tmux`/Neovim), sets `.NET` env (`~/.dotnet/tools`, `DOTNET_ROOT`, `DOTNET_ROLL_FORWARD=Major`), configures [Starship](https://starship.rs/) (`starship.toml` with `xmake`, C, Python, etc.), and adds aliases |
+| **Neovim** | Installs [AstroNvim](https://astronvim.com/) *(recommended)* or [LazyVim](https://www.lazyvim.org/). Existing configs are backed up to `*.bak`. Uses Termux's native `clangd`, `lua-language-server`, `csharp-ls`, `basedpyright`, and `ruff` instead of Mason ([clangd#1944](https://github.com/clangd/clangd/issues/1944)), disables Mason auto-installs, fixes Termux italic comment clipping (`termux_cursor.lua`), and includes `tokyonight` + Snacks colorscheme preview |
+| **Font** | Installs JetBrainsMono Nerd Font (`~/.termux/font.ttf`), Catppuccin Mocha colors (`~/.termux/colors.properties`), and Termux app tweaks (`~/.termux/termux.properties`: `bell-character = ignore`, `hide-soft-keyboard-on-startup`, `volume-keys = volume`, `disable-hardware-keyboard-shortcuts`, `back-key=escape`) |
+=======
+| **Zsh** | Installs [Oh My Zsh](https://ohmyz.sh/), `zsh-autosuggestions` + `zsh-syntax-highlighting` (plus `git`, `colored-man-pages`), wires up `zoxide`/`fzf`/`bat`/`yazi` (`y` wrapper)/`fastfetch` (skipped inside `tmux`/Neovim), sets `.NET` env (`~/.dotnet/tools`, `DOTNET_ROOT`, `DOTNET_ROLL_FORWARD=Major`), configures [Starship](https://starship.rs/) (`starship.toml` with `xmake`, C, Python, etc.), and adds aliases |
+| **Neovim** | Installs [AstroNvim](https://astronvim.com/) *(recommended)* or [LazyVim](https://www.lazyvim.org/). Existing configs are backed up to `*.bak`. Uses Termux's native `clangd`, `lua-language-server`, `csharp-ls`, `basedpyright`, and `ruff` instead of Mason ([clangd#1944](https://github.com/clangd/clangd/issues/1944)), disables Mason auto-installs, fixes Termux italic comment clipping (`termux_cursor.lua`), and includes `tokyonight` + Snacks colorscheme preview |
+| **Font** | Installs JetBrainsMono Nerd Font (`~/.termux/font.ttf`), Catppuccin Mocha colors (`~/.termux/colors.properties`), and Termux app tweaks (`~/.termux/termux.properties`: `bell-character = ignore`, `hide-soft-keyboard-on-startup`, `volume-keys = volume`, `extra-keys = []`, `disable-hardware-keyboard-shortcuts`, `back-key=escape`) |
+>>>>>>> main
 | **Tmux** | Writes `~/.tmux.conf` (Catppuccin Mocha bar, mouse support, `Ctrl-a`/`Ctrl-b` prefix, `\|`/`-` splits, `Alt+Arrow` pane switching, `vi` copy mode with Android clipboard via `termux-clipboard-set`) |
 | **Git** | Configures `git-delta` side-by-side diffs with line numbers, `zdiff3` merge conflicts, and `diff.colorMoved` in `~/.gitconfig`, plus `delta` + Nerd Font icons in `~/.config/lazygit/config.yml` |
 

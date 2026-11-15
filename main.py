@@ -2,6 +2,7 @@
 """Entry point: pick what to run. No imports from setup/configure."""
 
 import os
+import shutil
 import subprocess
 import sys
 
@@ -43,6 +44,9 @@ def dispatch(choices: tuple[str, ...]) -> int:
 
 def main() -> int:
     """Entry point: parse CLI flags or show the interactive Setup/Configure menu."""
+    if not shutil.which("tput"):
+        if subprocess.run("pkg install ncurses-utils -y", shell=True).returncode != 0:
+            print("[-] Failed to install ncurses-utils (tput), menus won't work (you can still use flags, e.g. --setup)")
     if subprocess.run("python -m pip install simple-term-menu==1.6.6", shell=True).returncode != 0:
         print("[-] Failed to install simple-term-menu, menus won't work (you can still use flags, e.g. --setup)")
 
