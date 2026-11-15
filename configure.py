@@ -108,6 +108,7 @@ def dispatch(choices: tuple[str, ...]) -> int:
         "lazyvim": lambda: configure_vim_lazyvim(),    # flag-only shortcut, skips the nvim menu
         "astronvim": lambda: configure_vim_astrovim(), # flag-only shortcut, skips the nvim menu
         "font": lambda: configure_font(),
+        "termux": lambda: configure_font(),            # flag alias for font/colors/properties
         "tmux": lambda: configure_tmux(),
         "git": lambda: configure_git(),
     })
@@ -403,9 +404,61 @@ color16=#fab387
 color17=#f5e0dc
 """
 
+TERMUX_PROPERTIES = {
+    "hide-soft-keyboard-on-startup": "true",
+    "volume-keys": "volume",
+    "disable-hardware-keyboard-shortcuts": "true",
+    "bell-character": "ignore",
+    "back-key": "escape",
+}
+
+
+def _configure_termux_properties(termux_dir: str) -> bool:
+    """Enable recommended Termux app properties without clobbering existing comments."""
+    props_path = os.path.join(termux_dir, "termux.properties")
+    try:
+        os.makedirs(termux_dir, exist_ok=True)
+        lines = open(props_path).read().splitlines(True) if os.path.exists(props_path) else []
+        remaining = dict(TERMUX_PROPERTIES)
+        new_lines = []
+
+        for line in lines:
+            matched_key = None
+            for key, val in remaining.items():
+                # Match either an active `key = ...` or commented `# key = ...` / `#key=...`
+                if re.match(rf"^\s*#?\s*{re.escape(key)}\s*=", line):
+                    is_commented = line.lstrip().startswith("#")
+                    # Multi-choice keys have several commented examples; only uncomment the matching value
+                    if is_commented and key in ("bell-character", "back-key") and val not in line:
+                        continue
+                    matched_key = key
+                    break
+            if matched_key:
+                val = remaining.pop(matched_key)
+                sep = "=" if matched_key == "back-key" else " = "
+                new_lines.append(f"{matched_key}{sep}{val}\n")
+            else:
+                new_lines.append(line)
+
+        if remaining:
+            if new_lines and not new_lines[-1].endswith("\n"):
+                new_lines[-1] += "\n"
+            for key, val in remaining.items():
+                sep = "=" if key == "back-key" else " = "
+                new_lines.append(f"{key}{sep}{val}\n")
+
+        with open(props_path, "w") as f:
+            f.writelines(new_lines)
+        print("[+] updated ~/.termux/termux.properties")
+        return True
+    except OSError as e:
+        print(f"[-] writing ~/.termux/termux.properties failed: {e}")
+        failures.append("writing ~/.termux/termux.properties")
+        return False
+
 
 def configure_font() -> int:
-    """Download JetBrainsMono Nerd Font and write Catppuccin Mocha terminal colors."""
+    """Download JetBrainsMono Nerd Font, write Catppuccin colors, and set termux.properties."""
     termux_dir = os.path.expanduser("~/.termux")
     ok = run("mkdir -p ~/.termux/", "creating ~/.termux")
     # download to a temp file first so a failed download doesn't wipe the current font
@@ -419,14 +472,24 @@ def configure_font() -> int:
         print(f"[-] writing ~/.termux/colors.properties failed: {e}")
         failures.append("writing ~/.termux/colors.properties")
         ok = False
+    ok = _configure_termux_properties(termux_dir) and ok
     if ok:
         run("termux-reload-settings", "termux-reload-settings")
     return 0 if ok else 1
 
-# --- Git (delta & diff/merge) ------------------------------------------------
+# --- Git & Lazygit (delta & diff/merge) --------------------------------------
+
+LAZYGIT_CONFIG = """git:
+  diffRenderers:
+    - colorArg: always
+      command: delta --dark --paging=never
+gui:
+  nerdFontsVersion: "3"
+"""
+
 
 def configure_git() -> int:
-    """Configure git-delta side-by-side diffs and zdiff3 conflict markers safely."""
+    """Configure git-delta side-by-side diffs, zdiff3 conflicts, and lazygit delta renderer."""
     settings = [
         ("core.pager", "delta"),
         ("interactive.diffFilter", "delta --color-only"),
@@ -440,6 +503,20 @@ def configure_git() -> int:
     ok = True
     for key, val in settings:
         ok = run(f'git config --global "{key}" "{val}"', f"setting git {key}") and ok
+
+    lg_path = os.path.expanduser("~/.config/lazygit/config.yml")
+    try:
+        os.makedirs(os.path.dirname(lg_path), exist_ok=True)
+        if os.path.exists(lg_path):
+            shutil.copy2(lg_path, lg_path + ".bak")
+        with open(lg_path, "w") as f:
+            f.write(LAZYGIT_CONFIG)
+        print("[+] wrote ~/.config/lazygit/config.yml")
+    except OSError as e:
+        print(f"[-] writing ~/.config/lazygit/config.yml failed: {e}")
+        failures.append("writing ~/.config/lazygit/config.yml")
+        ok = False
+
     if not shutil.which("delta"):
         print("[!] delta not found yet, install git-delta (run Setup) to use it as git pager")
     return 0 if ok else 1

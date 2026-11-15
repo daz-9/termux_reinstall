@@ -29,9 +29,9 @@ Installs the packages:
 
 | Category | Packages |
 |----------|----------|
-| C toolchain | `clang`, `lldb`, `gdb`, `make`, `bear`, `xmake` (with custom `br`, `san`, `dbg` plugins & `clangd` templates) |
-| Editor | `neovim`, `lua55`, `luarocks`, `lua-language-server`, `dotnet-sdk-9.0` + `csharp-ls`, `nodejs` + `basedpyright`, `ruff`, `ripgrep`, `fd`, `fzf`, `lazygit` |
-| Shell & CLI | `zsh`, `starship`, `git`, `zip`, `eza`, `yazi`, `zoxide`, `bat`, `tmux`, `man`, `manpages`, `fastfetch`, `termux-api` |
+| C/C++ & Rust | `clang`, `lldb`, `gdb`, `make`, `bear`, `rust`, `xmake` (with custom `br`, `san`, `dbg` plugins & `clangd` templates), `conan` (pip) |
+| Editor | `neovim`, `lua55`, `luarocks`, `lua-language-server`, `tree-sitter`, `dotnet-sdk-9.0` + `csharp-ls`, `nodejs` + `basedpyright`, `ruff`, `ripgrep`, `fd`, `fzf`, `lazygit` |
+| Shell & CLI | `zsh`, `starship`, `git`, `zip`, `eza`, `yazi`, `zoxide`, `bat`, `glow`, `tmux`, `man`, `manpages`, `fastfetch`, `termux-api` |
 | GitHub | `git`, `git-delta`, `openssh`, `gh` |
 
 Then sets **zsh** as the default shell (only if zsh actually installed).
@@ -44,9 +44,9 @@ If a step fails, the script prints why, carries on, and lists every failed step 
 |--------|--------------|
 | **Zsh** | Installs [Oh My Zsh](https://ohmyz.sh/), `zsh-autosuggestions` + `zsh-syntax-highlighting` (plus `git`, `colored-man-pages`), wires up `zoxide`/`fzf`/`bat`/`yazi` (`y` wrapper)/`fastfetch` (skipped inside `tmux`/Neovim), sets `.NET` env (`~/.dotnet/tools`, `DOTNET_ROOT`, `DOTNET_ROLL_FORWARD=Major`), configures [Starship](https://starship.rs/) (`starship.toml` with `xmake`, C, Python, etc.), and adds aliases |
 | **Neovim** | Installs [AstroNvim](https://astronvim.com/) *(recommended)* or [LazyVim](https://www.lazyvim.org/). Existing configs are backed up to `*.bak`. Uses Termux's native `clangd`, `lua-language-server`, `csharp-ls`, `basedpyright`, and `ruff` instead of Mason ([clangd#1944](https://github.com/clangd/clangd/issues/1944)), disables Mason auto-installs, fixes Termux italic comment clipping (`termux_cursor.lua`), and includes `tokyonight` + Snacks colorscheme preview |
-| **Font** | Installs JetBrainsMono Nerd Font (`~/.termux/font.ttf`) and Catppuccin Mocha terminal colors (`~/.termux/colors.properties`) |
+| **Font** | Installs JetBrainsMono Nerd Font (`~/.termux/font.ttf`), Catppuccin Mocha colors (`~/.termux/colors.properties`), and Termux app tweaks (`~/.termux/termux.properties`: `bell-character = ignore`, `hide-soft-keyboard-on-startup`, `volume-keys = volume`, `disable-hardware-keyboard-shortcuts`, `back-key=escape`) |
 | **Tmux** | Writes `~/.tmux.conf` (Catppuccin Mocha bar, mouse support, `Ctrl-a`/`Ctrl-b` prefix, `\|`/`-` splits, `Alt+Arrow` pane switching, `vi` copy mode with Android clipboard via `termux-clipboard-set`) |
-| **Git** | Configures `git-delta` side-by-side diffs with line numbers, `zdiff3` merge conflicts, and `diff.colorMoved` in `~/.gitconfig` |
+| **Git** | Configures `git-delta` side-by-side diffs with line numbers, `zdiff3` merge conflicts, and `diff.colorMoved` in `~/.gitconfig`, plus `delta` + Nerd Font icons in `~/.config/lazygit/config.yml` |
 
 > [!NOTE]
 > **Neovim distro stability:** On Termux, **AstroNvim is stable** and recommended. **LazyVim tends to crash** on Termux, though the option is still available if you want to test it.

@@ -63,12 +63,12 @@ def install_required_apps():
     apps_to_be_installed = [
         # Base / shell
         "fastfetch", "zip", "git", "zsh", "starship", "eza", "yazi", "zoxide",
-        "bat", "tmux", "man", "manpages", "termux-api",
-        # C toolchain
-        "clang", "lldb", "gdb", "make", "bear",
+        "bat", "glow", "tmux", "man", "manpages", "termux-api",
+        # C/C++ & Rust toolchains
+        "clang", "lldb", "gdb", "make", "bear", "rust",
         # Neovim + pickers + native LSP runtimes
-        "neovim", "lua55", "luarocks", "lua-language-server", "dotnet-sdk-9.0",
-        "nodejs", "ruff", "ripgrep", "fd", "fzf", "lazygit",
+        "neovim", "lua55", "luarocks", "lua-language-server", "tree-sitter",
+        "dotnet-sdk-9.0", "nodejs", "ruff", "ripgrep", "fd", "fzf", "lazygit",
         # GitHub / Git
         "git", "git-delta", "openssh", "gh",
     ]
@@ -236,6 +236,15 @@ def install_basedpyright():
     run("npm install -g basedpyright", "installing basedpyright")
 
 
+def install_conan():
+    """Install Conan C/C++ package manager via pip."""
+    if shutil.which("conan"):
+        print("[+] conan already installed, skipping")
+        return
+    print("[*] conan not found, installing via pip...")
+    run("python -m pip install conan", "installing conan")
+
+
 def clean_up():
     """Reload Termux settings and set zsh as the default login shell."""
     run("termux-reload-settings", "termux-reload-settings")
@@ -263,6 +272,7 @@ def main() -> int:
     install_xmake()
     install_csharp_ls()
     install_basedpyright()
+    install_conan()
     clean_up()
     print_summary()
     return 1 if failures else 0
