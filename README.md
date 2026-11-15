@@ -14,7 +14,7 @@ Turns a fresh Termux install into a **C/C++ dev environment** (with Python, C#, 
 Paste this into a fresh Termux session:
 
 ```sh
-pkg update && pkg upgrade -y && pkg install git jp2a python-pip wget -y && git clone https://github.com/daz-9/termux_reinstall && cd termux_reinstall && python3 main.py
+pkg update && pkg upgrade -y && pkg install git jp2a ncurses-utils python-pip wget -y && git clone https://github.com/daz-9/termux_reinstall && cd termux_reinstall && python3 main.py
 ```
 
 Use <kbd>Space</kbd> to select items in the menus and <kbd>Enter</kbd> to confirm.

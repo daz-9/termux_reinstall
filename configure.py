@@ -45,6 +45,9 @@ def main() -> int:
         print_summary()
         return 1 if failures else 0
 
+    if not shutil.which("tput"):
+        run("pkg install ncurses-utils -y", "installing ncurses-utils")
+
     from simple_term_menu import TerminalMenu
 
     terminal_menu = TerminalMenu(
@@ -65,6 +68,9 @@ def main() -> int:
 
 def neovim_config() -> int:
     """Show a sub-menu to choose between LazyVim and AstroNvim."""
+    if not shutil.which("tput"):
+        run("pkg install ncurses-utils -y", "installing ncurses-utils")
+
     from simple_term_menu import TerminalMenu
 
     neovim_config_menu = TerminalMenu(

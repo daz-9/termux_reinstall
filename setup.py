@@ -53,7 +53,7 @@ def initialize_pkg():
     """Update Termux package lists and install bootstrap utilities."""
     run(["pkg", "update", "-y"], "pkg update")
     run(["pkg", "upgrade", "-y"], "pkg upgrade")
-    run("pkg install curl wget jp2a -y", "installing installation apps (curl, wget, jp2a)")
+    run("pkg install curl wget jp2a ncurses-utils -y", "installing installation apps (curl, wget, jp2a, ncurses-utils)")
 
 
 def install_required_apps():
