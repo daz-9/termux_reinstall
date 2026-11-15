@@ -413,6 +413,7 @@ color17=#f5e0dc
 TERMUX_PROPERTIES = {
     "hide-soft-keyboard-on-startup": "true",
     "volume-keys": "volume",
+    "extra-keys": "[]",
     "disable-hardware-keyboard-shortcuts": "true",
     "bell-character": "ignore",
     "back-key": "escape",
