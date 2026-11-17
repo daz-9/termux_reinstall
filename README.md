@@ -33,6 +33,7 @@ Installs the packages:
 | Editor | `neovim`, `lua55`, `luarocks`, `lua-language-server`, `tree-sitter`, `dotnet-sdk-9.0` + `csharp-ls`, `nodejs` + `basedpyright`, `ruff`, `ripgrep`, `fd`, `fzf`, `lazygit` |
 | Shell & CLI | `zsh`, `starship`, `git`, `zip`, `eza`, `yazi`, `zoxide`, `bat`, `glow`, `tmux`, `man`, `manpages`, `fastfetch`, `termux-api` |
 | GitHub | `git`, `git-delta`, `openssh`, `gh` |
+| **x11** *(optional in `setup.py`)* | `x11-repo`, `tur-repo`, `termux-x11-nightly`, `quickshell`, `eww`, `bspwm`, `polybar`, `rofi`, `sxhkd`, `fastcompmgr`, `sway`, `swaybg`, `labwc`, `foot`, `feh`, `xfce4-terminal`, `alacritty`, `virglrenderer-android`, `xorg-xcursorgen`, `xorg-xsetroot` |
 
 Then sets **zsh** as the default shell (only if zsh actually installed).
 
@@ -47,6 +48,7 @@ If a step fails, the script prints why, carries on, and lists every failed step 
 | **Font** | Installs JetBrainsMono Nerd Font (`~/.termux/font.ttf`), Catppuccin Mocha colors (`~/.termux/colors.properties`), and Termux app tweaks (`~/.termux/termux.properties`: `bell-character = ignore`, `hide-soft-keyboard-on-startup`, `volume-keys = volume`, `extra-keys = []`, `disable-hardware-keyboard-shortcuts = false`, `back-key=escape`) |
 | **Tmux** | Writes `~/.tmux.conf` (Catppuccin Mocha bar, mouse support, `Ctrl-a`/`Ctrl-b` prefix, `\|`/`-` splits, `Alt+Arrow` pane switching, `vi` copy mode with Android clipboard via `termux-clipboard-set`) |
 | **Git** | Configures `git-delta` side-by-side diffs with line numbers, `zdiff3` merge conflicts, and `diff.colorMoved` in `~/.gitconfig`, plus `delta` + Nerd Font icons in `~/.config/lazygit/config.yml` |
+| **x11** | Writes Catppuccin Mocha configs for X11 (`bspwm`, `sxhkd`, `polybar`, `quickshell`, `eww`, `fastcompmgr`, `rofi`, `xfce4-terminal`, `picom`) and Wayland (`sway`, `labwc`, `foot`, `quickshell`), builds the `TouchDot-Mocha` cursor theme, downloads the wallpaper, and installs `~/start-x11.sh` (`desktop`) and `~/start-wayland.sh` (`desktop-wayland`) |
 
 > [!NOTE]
 > **Neovim distro stability:** On Termux, **AstroNvim is stable** and recommended. **LazyVim tends to crash** on Termux, though the option is still available if you want to test it.
@@ -82,7 +84,8 @@ Skip the menus by passing flags (case-insensitive, any number of them):
 
 ```sh
 python main.py --setup --configure
-python configure.py --zsh --font --tmux --git --astronvim     # recommended (or --lazyvim / --neovim)
+python setup.py --core --x11
+python configure.py --zsh --font --tmux --git --astronvim     # recommended (or --lazyvim / --neovim; add --x11 for bspwm/polybar/rofi)
 ```
 
 ---

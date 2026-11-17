@@ -1,11 +1,15 @@
 #!/usr/bin/env python3
 """Configure Zsh/Starship, Neovim (AstroNvim/LazyVim + native LSPs), Font/Colors, and Tmux."""
 
+import math
 import os
 import re
 import shutil
+import struct
 import subprocess
 import sys
+import tempfile
+import zlib
 
 # Everything that failed gets collected here and printed at the end
 failures: list[str] = []
@@ -51,7 +55,7 @@ def main() -> int:
     from simple_term_menu import TerminalMenu
 
     terminal_menu = TerminalMenu(
-        ["Zsh", "Neovim", "Font", "Tmux", "Git"],
+        ["Zsh", "Neovim", "Font", "Tmux", "Git", "x11"],
         multi_select=True,
         show_multi_select_hint=True,
         title="Select what to configure (use space to select, enter to confirm):",
@@ -117,6 +121,7 @@ def dispatch(choices: tuple[str, ...]) -> int:
         "termux": lambda: configure_font(),            # flag alias for font/colors/properties
         "tmux": lambda: configure_tmux(),
         "git": lambda: configure_git(),
+        "x11": lambda: configure_x11(),
     })
 
 
@@ -886,6 +891,5621 @@ def configure_vim_astrovim() -> int:
     except OSError as e:
         print(f"[-] writing community.lua failed: {e}")
         failures.append("writing community.lua")
+    return 0
+
+
+# --- X11 (bspwm + sxhkd + polybar + rofi) ------------------------------------
+
+BSPWMRC = """#!/data/data/com.termux/files/usr/bin/sh
+
+export BSPWM_SOCKET="${BSPWM_SOCKET:-${TMPDIR:-/data/data/com.termux/files/usr/tmp}/bspwm_0_0-socket}"
+export XCURSOR_THEME="${XCURSOR_THEME:-TouchDot-Mocha}"
+export XCURSOR_SIZE="${XCURSOR_SIZE:-32}"
+
+[ -f "$HOME/.Xresources" ] && command -v xrdb >/dev/null 2>&1 && xrdb -merge "$HOME/.Xresources" >/dev/null 2>&1 || true
+command -v xsetroot >/dev/null 2>&1 && xsetroot -cursor_name left_ptr >/dev/null 2>&1 || true
+
+pgrep -x sxhkd >/dev/null || sxhkd &
+
+bspc monitor -d 1 2 3 4 5 6
+
+bspc config border_width          2
+bspc config window_gap            12
+bspc config split_ratio           0.52
+bspc config borderless_monocle    true
+bspc config gapless_monocle       true
+bspc config focus_follows_pointer true
+bspc config pointer_modifier      mod1
+
+# Catppuccin Mocha borders
+bspc config normal_border_color   "#313244"
+bspc config active_border_color   "#45475a"
+bspc config focused_border_color  "#89b4fa"
+bspc config presel_feedback_color "#cba6f7"
+
+if command -v fastcompmgr >/dev/null 2>&1; then
+  pkill -x fastcompmgr 2>/dev/null || true
+  pkill -x picom 2>/dev/null || true
+  fastcompmgr >/dev/null 2>&1 &
+elif command -v picom >/dev/null 2>&1; then
+  pkill -x picom 2>/dev/null || true
+  picom --config "${XDG_CONFIG_HOME:-$HOME/.config}/picom/picom.conf" >> "${TMPDIR:-/data/data/com.termux/files/usr/tmp}/picom.log" 2>&1 &
+fi
+
+if command -v feh >/dev/null 2>&1 && [ -f "$HOME/.local/share/wallpapers/wallpaper.jpg" ]; then
+  feh --no-fehbg --bg-fill "$HOME/.local/share/wallpapers/wallpaper.jpg" &
+fi
+
+if [ -f "${TMPDIR:-/data/data/com.termux/files/usr/tmp}/hide-cursor.pid" ]; then
+  kill "$(cat "${TMPDIR:-/data/data/com.termux/files/usr/tmp}/hide-cursor.pid")" 2>/dev/null || true
+  rm -f "${TMPDIR:-/data/data/com.termux/files/usr/tmp}/hide-cursor.pid"
+fi
+if [ -x "${XDG_CONFIG_HOME:-$HOME/.config}/bspwm/hide-cursor.py" ]; then
+  "${XDG_CONFIG_HOME:-$HOME/.config}/bspwm/hide-cursor.py" >/dev/null 2>&1 &
+fi
+
+"${XDG_CONFIG_HOME:-$HOME/.config}/polybar/launch.sh" &
+if command -v quickshell >/dev/null 2>&1; then
+  "${XDG_CONFIG_HOME:-$HOME/.config}/quickshell/launch.sh" &
+elif command -v eww >/dev/null 2>&1; then
+  "${XDG_CONFIG_HOME:-$HOME/.config}/eww/launch.sh" &
+fi
+"""
+
+SXHKDRC = """# i3-style keybinds for bspwm ($mod = Alt or Super/Command)
+
+# Terminal (xfce4-terminal for fast 2D rendering on Mali; Shift+Return for VirGL Alacritty)
+{alt,super} + Return
+	if command -v xfce4-terminal >/dev/null 2>&1; then exec xfce4-terminal; else exec alacritty; fi
+
+{alt,super} + shift + Return
+	GALLIUM_DRIVER=virpipe alacritty
+
+# App launcher (i3: $mod+d / $mod+Shift+d)
+{alt,super} + d
+	rofi -show drun
+
+{alt,super} + shift + d
+	rofi -show run
+
+# Kill / force-kill focused window (i3: $mod+Shift+q)
+{alt,super} + shift + q
+	bspc node -c
+
+{alt,super} + shift + ctrl + q
+	bspc node -k
+
+# Focus window (i3: $mod + h/j/k/l or arrows)
+# NOTE: Separate alt/super blocks to work around sxhkd multi-brace pairing truncation.
+alt + {h,j,k,l,Left,Down,Up,Right}
+	bspc node -f {west,south,north,east,west,south,north,east}
+
+super + {h,j,k,l,Left,Down,Up,Right}
+	bspc node -f {west,south,north,east,west,south,north,east}
+
+# Move/swap window (i3: $mod+Shift + h/j/k/l or arrows)
+alt + shift + {h,j,k,l,Left,Down,Up,Right}
+	bspc node -s {west,south,north,east,west,south,north,east}
+
+super + shift + {h,j,k,l,Left,Down,Up,Right}
+	bspc node -s {west,south,north,east,west,south,north,east}
+
+# Split direction (i3-style: $mod+v vertical/below, $mod+b horizontal/right)
+alt + {v,b}
+	bspc node -p {south,east}
+
+super + {v,b}
+	bspc node -p {south,east}
+
+{alt,super} + ctrl + space
+	bspc node -p cancel
+
+# Fullscreen toggle (i3: $mod+f)
+{alt,super} + f
+	bspc node -t ~fullscreen
+
+# Floating toggle (i3: $mod+Shift+space)
+{alt,super} + shift + space
+	bspc node -t ~floating
+
+# Layout toggle (i3: $mod+w monocle, $mod+e tiled)
+{alt,super} + w
+	bspc desktop -l next
+
+{alt,super} + e
+	bspc desktop -l tiled
+
+# Resize focused window ($mod+Ctrl + h/j/k/l)
+{alt,super} + ctrl + h
+	bspc node -z right -20 0 || bspc node -z left 20 0
+
+{alt,super} + ctrl + l
+	bspc node -z right 20 0 || bspc node -z left -20 0
+
+{alt,super} + ctrl + k
+	bspc node -z bottom 0 -20 || bspc node -z top 0 20
+
+{alt,super} + ctrl + j
+	bspc node -z bottom 0 20 || bspc node -z top 0 -20
+
+# Switch to workspace (i3: $mod+1..6)
+alt + {1,2,3,4,5,6}
+	bspc desktop -f '^{1,2,3,4,5,6}'
+
+super + {1,2,3,4,5,6}
+	bspc desktop -f '^{1,2,3,4,5,6}'
+
+# Move window to workspace (i3: $mod+Shift+1..6)
+alt + shift + {1,2,3,4,5,6}
+	bspc node -d '^{1,2,3,4,5,6}'
+
+super + shift + {1,2,3,4,5,6}
+	bspc node -d '^{1,2,3,4,5,6}'
+
+# Reload sxhkd (i3: $mod+Shift+c)
+{alt,super} + shift + c
+	pkill -USR1 -x sxhkd
+
+# Restart bspwm (i3: $mod+Shift+r)
+{alt,super} + shift + r
+	bspc wm -r
+
+# Exit bspwm session (i3: $mod+Shift+e)
+{alt,super} + shift + e
+	bspc quit
+"""
+
+POLYBAR_LAUNCH = """#!/data/data/com.termux/files/usr/bin/sh
+
+export BSPWM_SOCKET="${BSPWM_SOCKET:-${TMPDIR:-/data/data/com.termux/files/usr/tmp}/bspwm_0_0-socket}"
+export XCURSOR_THEME="${XCURSOR_THEME:-TouchDot-Mocha}"
+export XCURSOR_SIZE="${XCURSOR_SIZE:-32}"
+
+pkill -x polybar 2>/dev/null || true
+while pgrep -u "$(id -u)" -x polybar >/dev/null 2>&1; do
+  sleep 0.2
+done
+
+MONITOR="$(polybar -m 2>/dev/null | head -n1 | cut -d: -f1)"
+export MONITOR="${MONITOR:-builtin}"
+
+LOG="${TMPDIR:-/data/data/com.termux/files/usr/tmp}/polybar.log"
+polybar main >> "$LOG" 2>&1 &
+"""
+
+POLYBAR_CONFIG = """; Catppuccin Mocha Polybar config tuned for Termux/Android
+
+[colors]
+base = #1e1e2e
+surface = #313244
+surface1 = #45475a
+text = #cdd6f4
+subtext = #a6adc8
+blue = #89b4fa
+mauve = #cba6f7
+green = #a6e3a1
+teal = #94e2d5
+red = #f38ba8
+
+[bar/main]
+monitor = ${env:MONITOR:builtin}
+width = 100%
+height = 40pt
+radius = 16
+border-size = 8pt
+border-color = #00000000
+background = ${colors.base}
+foreground = ${colors.text}
+line-size = 3pt
+padding-left = 2
+padding-right = 3
+module-margin = 2
+separator = |
+separator-foreground = ${colors.surface1}
+
+font-0 = "JetBrainsMono Nerd Font:size=14;3"
+font-1 = "monospace:size=14;3"
+
+cursor-click = pointer
+cursor-scroll = ns-resize
+
+modules-left = xwindow
+modules-center =
+modules-right = cpu memory battery date
+
+wm-restack = bspwm
+enable-ipc = true
+
+[module/xwindow]
+type = internal/xwindow
+label = %title:0:60:...%
+label-empty = Ready
+label-foreground = ${colors.text}
+label-empty-foreground = ${colors.subtext}
+
+[module/cpu]
+type = custom/script
+exec = ~/.config/polybar/cpu.py
+tail = true
+
+[module/memory]
+type = internal/memory
+interval = 3
+format-prefix = "\U000f035b "
+format-prefix-foreground = ${colors.mauve}
+label = %gb_used% (%percentage_used%%)
+
+[module/battery]
+type = custom/script
+exec = ~/.config/polybar/battery.sh
+interval = 30
+
+[module/date]
+type = internal/date
+interval = 1
+date = %a %d %b
+time = %H:%M
+format-prefix = "\uf017 "
+format-prefix-foreground = ${colors.blue}
+label = %date%  %time%
+label-foreground = ${colors.blue}
+"""
+
+POLYBAR_BATTERY_SH = """#!/data/data/com.termux/files/usr/bin/sh
+if ! command -v termux-battery-status >/dev/null 2>&1; then
+  printf "BAT --\\n"
+  exit 0
+fi
+
+out="$(timeout 4 termux-battery-status 2>/dev/null)" || true
+if [ -z "$out" ]; then
+  printf "BAT --\\n"
+  exit 0
+fi
+
+eval "$(printf '%s\\n' "$out" | awk -F: '
+  /"percentage"/ { gsub(/[^0-9]/, "", $2); pct=$2 }
+  /"status"/     { gsub(/[^A-Za-z]/, "", $2); st=$2 }
+  END { printf "pct=%s\\nst=%s\\n", pct, st }
+')"
+
+if [ -z "$pct" ]; then
+  printf "BAT --\\n"
+  exit 0
+fi
+
+if [ "$st" = "CHARGING" ]; then
+  icon="\uf0e7"
+  color="#a6e3a1"
+elif [ "$pct" -ge 85 ]; then
+  icon="\uf240"
+  color="#a6e3a1"
+elif [ "$pct" -ge 60 ]; then
+  icon="\uf241"
+  color="#94e2d5"
+elif [ "$pct" -ge 35 ]; then
+  icon="\uf242"
+  color="#cdd6f4"
+elif [ "$pct" -ge 15 ]; then
+  icon="\uf243"
+  color="#fab387"
+else
+  icon="\uf244"
+  color="#f38ba8"
+fi
+
+printf "%%{F%s}%s %s%%%%{F-}\\n" "$color" "$icon" "$pct"
+"""
+
+POLYBAR_CPU_PY = """#!/data/data/com.termux/files/usr/bin/python3
+\"\"\"Stream Termux/X11 CPU utilization across visible processes for Polybar.\"\"\"
+
+import os
+import signal
+import sys
+import time
+
+
+def _total_jiffies() -> int:
+    total = 0
+    for name in os.listdir("/proc"):
+        if not name.isdigit():
+            continue
+        try:
+            with open(f"/proc/{name}/stat") as f:
+                data = f.read()
+            rp = data.rfind(")")
+            if rp < 0:
+                continue
+            fields = data[rp + 2:].split()
+            total += int(fields[11]) + int(fields[12])
+        except (OSError, IndexError, ValueError):
+            pass
+    return total
+
+
+def main() -> int:
+    running = True
+
+    def stop(_signum, _frame):
+        nonlocal running
+        running = False
+
+    signal.signal(signal.SIGTERM, stop)
+    signal.signal(signal.SIGINT, stop)
+
+    clk = os.sysconf("SC_CLK_TCK")
+    ncpu = os.cpu_count() or 1
+    j_prev = _total_jiffies()
+    t_prev = time.monotonic()
+
+    # Emit initial quick sample right away, then poll every 3s
+    time.sleep(0.35)
+    while running:
+        j_now = _total_jiffies()
+        t_now = time.monotonic()
+        dt = max(0.05, t_now - t_prev)
+        pct = min(100, max(0, round(((j_now - j_prev) / clk) / (dt * ncpu) * 100.0)))
+        j_prev, t_prev = j_now, t_now
+
+        if pct >= 80:
+            color = "#f38ba8"
+        elif pct >= 50:
+            color = "#fab387"
+        else:
+            color = "#94e2d5"
+
+        print(f"%{{F{color}}}\uf4bc%{{F-}} {pct}%", flush=True)
+        for _ in range(30):
+            if not running:
+                break
+            time.sleep(0.1)
+
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
+"""
+
+EWW_LAUNCH_SH = """#!/data/data/com.termux/files/usr/bin/sh
+
+export BSPWM_SOCKET="${BSPWM_SOCKET:-${TMPDIR:-/data/data/com.termux/files/usr/tmp}/bspwm_0_0-socket}"
+export XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-${TMPDIR:-/data/data/com.termux/files/usr/tmp}}"
+export XDG_CACHE_HOME="${XDG_CACHE_HOME:-$HOME/.cache}"
+export GDK_BACKEND=x11
+export XCURSOR_THEME="${XCURSOR_THEME:-TouchDot-Mocha}"
+export XCURSOR_SIZE="${XCURSOR_SIZE:-32}"
+
+eww kill >/dev/null 2>&1 || true
+[ -f "${TMPDIR:-/data/data/com.termux/files/usr/tmp}/eww-watch.pid" ] && kill "$(cat "${TMPDIR:-/data/data/com.termux/files/usr/tmp}/eww-watch.pid")" 2>/dev/null || true
+rm -f "${TMPDIR:-/data/data/com.termux/files/usr/tmp}/eww-watch.pid"
+pkill -x eww 2>/dev/null || true
+while pgrep -u "$(id -u)" -x eww >/dev/null 2>&1; do
+  sleep 0.15
+done
+
+LOG="${TMPDIR:-/data/data/com.termux/files/usr/tmp}/eww.log"
+# Give picom a moment on cold X11 boot so GTK3 sees compositor RGBA visual
+if pgrep -x picom >/dev/null 2>&1; then
+  sleep 0.2
+fi
+eww daemon >> "$LOG" 2>&1 &
+
+i=0
+while [ "$i" -lt 25 ]; do
+  if eww ping >/dev/null 2>&1; then
+    break
+  fi
+  i=$((i + 1))
+  sleep 0.1
+done
+
+eww open dock >> "$LOG" 2>&1 || true
+bspc config left_padding 128 >/dev/null 2>&1 || true
+"""
+
+EWW_BSPWM_STATE_PY = """#!/data/data/com.termux/files/usr/bin/python3
+\"\"\"Stream bspwm desktop & layout state as JSON lines for eww deflisten.\"\"\"
+
+import json
+import os
+import signal
+import subprocess
+import sys
+
+
+def parse_report(line: str) -> dict | None:
+    parts = line.strip().split(":")
+    if len(parts) < 2:
+        return None
+    desktops = []
+    layout = "T"
+    for part in parts:
+        if len(part) < 2:
+            continue
+        tag, name = part[0], part[1:]
+        if tag in "FfOoUu":
+            try:
+                num = int(name)
+            except ValueError:
+                continue
+            desktops.append({
+                "num": num,
+                "focused": tag in "FOU",
+                "occupied": tag in "Oo",
+                "urgent": tag in "Uu",
+            })
+        elif tag == "L":
+            layout = name
+    if not desktops:
+        return None
+    return {"layout": layout, "desktops": desktops}
+
+
+def main() -> int:
+    proc = subprocess.Popen(
+        ["bspc", "subscribe", "report"],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.DEVNULL,
+        text=True,
+        bufsize=1,
+    )
+
+    def stop(_sig, _frame):
+        proc.terminate()
+        sys.exit(0)
+
+    signal.signal(signal.SIGTERM, stop)
+    signal.signal(signal.SIGINT, stop)
+
+    assert proc.stdout is not None
+    for line in proc.stdout:
+        state = parse_report(line)
+        if state is not None:
+            print(json.dumps(state), flush=True)
+    return proc.wait()
+
+
+if __name__ == "__main__":
+    sys.exit(main())
+"""
+
+EWW_AUDIO_STATE_SH = """#!/data/data/com.termux/files/usr/bin/sh
+vol=$(pactl get-sink-volume @DEFAULT_SINK@ 2>/dev/null | grep -oE '[0-9]+%' | head -n1 | tr -d '%')
+mute=$(pactl get-sink-mute @DEFAULT_SINK@ 2>/dev/null)
+case "$vol" in
+  ''|*[!0-9]*) vol=50 ;;
+esac
+case "$mute" in
+  *yes*) muted=true ;;
+  *) muted=false ;;
+esac
+printf '{"pct":%s,"muted":%s}\\n' "$vol" "$muted"
+"""
+
+EWW_TOGGLE_WINDOW_SH = """#!/data/data/com.termux/files/usr/bin/sh
+mode="toggle"
+if [ "$1" = "close" ] || [ "$1" = "open" ]; then
+  mode="$1"
+  shift
+fi
+win="$1"
+var="$2"
+
+close_win() {
+  eww close "$win" >/dev/null 2>&1 || true
+  eww update "$var=false" >/dev/null 2>&1 || true
+}
+
+open_win() {
+  eww update "$var=true" >/dev/null 2>&1 || true
+  eww open "$win" >/dev/null 2>&1 || true
+  watch_pid="${TMPDIR:-/data/data/com.termux/files/usr/tmp}/eww-watch.pid"
+  if [ ! -f "$watch_pid" ] || ! kill -0 "$(cat "$watch_pid" 2>/dev/null)" 2>/dev/null; then
+    if [ -x "${XDG_CONFIG_HOME:-$HOME/.config}/eww/scripts/submenu_watch.py" ]; then
+      "${XDG_CONFIG_HOME:-$HOME/.config}/eww/scripts/submenu_watch.py" >/dev/null 2>&1 &
+    fi
+  fi
+}
+
+if [ "$mode" = "close" ]; then
+  close_win
+elif [ "$mode" = "open" ]; then
+  open_win
+elif eww active-windows 2>/dev/null | grep -q "$win"; then
+  close_win
+else
+  open_win
+fi
+"""
+
+EWW_SUBMENU_WATCH_PY = """#!/data/data/com.termux/files/usr/bin/python3
+\"\"\"Auto-close open Eww submenus on focus loss, popup/launcher open, or outside click.\"\"\"
+
+import os
+import select
+import signal
+import subprocess
+import sys
+import time
+from ctypes import CDLL, POINTER, Structure, byref, c_char, c_char_p, c_int, c_long, c_ubyte, c_uint, c_ulong, c_void_p, string_at
+
+
+class XWA(Structure):
+    _fields_ = [
+        ("x", c_int), ("y", c_int), ("width", c_int), ("height", c_int),
+        ("border_width", c_int), ("depth", c_int), ("visual", c_void_p),
+        ("root", c_ulong), ("c_class", c_int), ("bit_gravity", c_int),
+        ("win_gravity", c_int), ("backing_store", c_int),
+        ("backing_planes", c_long), ("backing_pixel", c_long),
+        ("save_under", c_int), ("colormap", c_ulong), ("map_installed", c_int),
+        ("map_state", c_int), ("all_event_masks", c_long), ("your_event_mask", c_long),
+        ("do_not_propagate_mask", c_long), ("override_redirect", c_int), ("screen", c_void_p),
+    ]
+
+
+class XIEventMask(Structure):
+    _fields_ = [("deviceid", c_int), ("mask_len", c_int), ("mask", POINTER(c_ubyte))]
+
+
+def _inspect_tree(x11, dpy, root):
+    r, p, ch, n = c_ulong(), c_ulong(), POINTER(c_ulong)(), c_uint()
+    rects = {}
+    foreign_popup = False
+    if not x11.XQueryTree(dpy, root, byref(r), byref(p), byref(ch), byref(n)):
+        return rects, foreign_popup
+    try:
+        for i in range(n.value):
+            a = XWA()
+            if not x11.XGetWindowAttributes(dpy, ch[i], byref(a)) or a.map_state != 2:
+                continue
+            nm = c_void_p()
+            name = b""
+            if x11.XFetchName(dpy, ch[i], byref(nm)) and nm.value:
+                name = string_at(nm.value)
+                x11.XFree(nm)
+            if name in (b"Eww - dock", b"Eww - widget_drawer", b"Eww - session_menu"):
+                rects[name.decode()] = (a.x, a.y, a.width, a.height)
+            elif a.override_redirect == 1 and a.width >= 200 and a.height >= 150 and not name.startswith(b"Eww"):
+                foreign_popup = True
+    finally:
+        if ch:
+            x11.XFree(ch)
+    return rects, foreign_popup
+
+
+def _point_in(px: int, py: int, rect) -> bool:
+    if rect is None:
+        return False
+    x, y, w, h = rect
+    return x <= px < x + w and y <= py < y + h
+
+
+def _close_open(rects) -> None:
+    toggle = os.path.expanduser("~/.config/eww/scripts/toggle_window.sh")
+    targets = []
+    if "Eww - widget_drawer" in rects:
+        targets.append(("widget_drawer", "widgets_open"))
+    if "Eww - session_menu" in rects:
+        targets.append(("session_menu", "session_open"))
+    procs = [subprocess.Popen([toggle, "close", win, var]) for win, var in targets]
+    for proc in procs:
+        proc.wait()
+
+
+def main() -> int:
+    x11 = CDLL("libX11.so.6")
+    xi = CDLL("libXi.so")
+
+    x11.XOpenDisplay.restype = c_void_p
+    x11.XOpenDisplay.argtypes = [c_char_p]
+    x11.XDefaultRootWindow.restype = c_ulong
+    x11.XDefaultRootWindow.argtypes = [c_void_p]
+    x11.XConnectionNumber.restype = c_int
+    x11.XConnectionNumber.argtypes = [c_void_p]
+    x11.XPending.restype = c_int
+    x11.XPending.argtypes = [c_void_p]
+    x11.XNextEvent.argtypes = [c_void_p, c_void_p]
+    x11.XFlush.argtypes = [c_void_p]
+    x11.XQueryTree.restype = c_int
+    x11.XQueryTree.argtypes = [c_void_p, c_ulong, POINTER(c_ulong), POINTER(c_ulong), POINTER(POINTER(c_ulong)), POINTER(c_uint)]
+    x11.XGetWindowAttributes.restype = c_int
+    x11.XGetWindowAttributes.argtypes = [c_void_p, c_ulong, POINTER(XWA)]
+    x11.XFetchName.restype = c_int
+    x11.XFetchName.argtypes = [c_void_p, c_ulong, POINTER(c_void_p)]
+    x11.XFree.argtypes = [c_void_p]
+    x11.XGetInputFocus.argtypes = [c_void_p, POINTER(c_ulong), POINTER(c_int)]
+    x11.XQueryPointer.restype = c_int
+    x11.XQueryPointer.argtypes = [
+        c_void_p, c_ulong, c_void_p, c_void_p,
+        c_void_p, c_void_p, c_void_p, c_void_p, c_void_p,
+    ]
+    x11.XCloseDisplay.argtypes = [c_void_p]
+
+    xi.XIQueryVersion.argtypes = [c_void_p, POINTER(c_int), POINTER(c_int)]
+    xi.XISelectEvents.argtypes = [c_void_p, c_ulong, POINTER(XIEventMask), c_int]
+
+    dpy = x11.XOpenDisplay(os.environ.get("DISPLAY", ":0").encode())
+    if not dpy:
+        return 1
+    root = x11.XDefaultRootWindow(dpy)
+    xfd = x11.XConnectionNumber(dpy)
+
+    maj, minv = c_int(2), c_int(2)
+    xi.XIQueryVersion(dpy, byref(maj), byref(minv))
+
+    # XIAllMasterDevices = 1; XI_RawButtonPress = 15 (1 << 15 -> byte 1 bit 7 = 0x80)
+    ev_mask = (c_ubyte * 4)(0, 0x80, 0, 0)
+    em = XIEventMask(deviceid=1, mask_len=4, mask=ev_mask)
+    xi.XISelectEvents(dpy, root, byref(em), 1)
+    x11.XFlush(dpy)
+
+    running = True
+
+    def stop(_sig, _frame):
+        nonlocal running
+        running = False
+
+    signal.signal(signal.SIGTERM, stop)
+    signal.signal(signal.SIGINT, stop)
+
+    pid_path = os.path.join(
+        os.environ.get("TMPDIR", "/data/data/com.termux/files/usr/tmp"),
+        "eww-watch.pid",
+    )
+    try:
+        with open(pid_path, "w") as pf:
+            pf.write(str(os.getpid()))
+    except OSError:
+        pid_path = ""
+
+    focus_win, revert_to = c_ulong(), c_int()
+    x11.XGetInputFocus(dpy, byref(focus_win), byref(revert_to))
+    initial_focus = focus_win.value
+
+    r_win, c_win = c_ulong(), c_ulong()
+    rx, ry, wx, wy = c_int(), c_int(), c_int(), c_int()
+    mask = c_uint()
+    ev_buf = (c_char * 192)()
+    start_t = time.monotonic()
+
+    # Wait briefly for eww open before exiting on empty rects
+    seen_submenu = False
+
+    while running:
+        readable, _, _ = select.select([xfd], [], [], 0.12)
+        clicked = False
+        if readable:
+            while x11.XPending(dpy) > 0:
+                x11.XNextEvent(dpy, ev_buf)
+                clicked = True
+
+        rects, foreign_popup = _inspect_tree(x11, dpy, root)
+        has_sub = ("Eww - widget_drawer" in rects) or ("Eww - session_menu" in rects)
+        if has_sub:
+            seen_submenu = True
+        elif seen_submenu or (time.monotonic() - start_t) > 1.0:
+            break
+
+        if not has_sub:
+            continue
+
+        x11.XGetInputFocus(dpy, byref(focus_win), byref(revert_to))
+        if (focus_win.value != initial_focus and focus_win.value != 0) or foreign_popup:
+            _close_open(rects)
+            break
+
+        if clicked and (time.monotonic() - start_t) >= 0.05:
+            if x11.XQueryPointer(dpy, root, byref(r_win), byref(c_win), byref(rx), byref(ry), byref(wx), byref(wy), byref(mask)):
+                px, py = rx.value, ry.value
+                in_drawer = _point_in(px, py, rects.get("Eww - widget_drawer"))
+                in_session = _point_in(px, py, rects.get("Eww - session_menu"))
+                dock_r = rects.get("Eww - dock")
+                on_toggle_btn = False
+                if dock_r and _point_in(px, py, dock_r):
+                    dx0, dy0, dw, dh = dock_r
+                    on_spacer = (dy0 + 755 <= py <= dy0 + dh - 470)
+                    on_power = (py >= dy0 + dh - 78)
+                    on_toggle_btn = on_spacer or on_power
+                if not in_drawer and not in_session and not on_toggle_btn:
+                    _close_open(rects)
+                    break
+
+    if pid_path:
+        try:
+            os.remove(pid_path)
+        except OSError:
+            pass
+    x11.XCloseDisplay(dpy)
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
+"""
+
+EWW_YUCK = """(deflisten bspwm_state
+  :initial '{"layout":"T","desktops":[{"num":1,"focused":true,"occupied":false,"urgent":false},{"num":2,"focused":false,"occupied":false,"urgent":false},{"num":3,"focused":false,"occupied":false,"urgent":false},{"num":4,"focused":false,"occupied":false,"urgent":false},{"num":5,"focused":false,"occupied":false,"urgent":false},{"num":6,"focused":false,"occupied":false,"urgent":false}]}'
+  "~/.config/eww/scripts/bspwm_state.py")
+
+(defpoll audio_state
+  :interval "4s"
+  :initial '{"pct":50,"muted":false}'
+  "~/.config/eww/scripts/audio_state.sh")
+
+(defvar session_open false)
+(defvar widgets_open false)
+
+(defwidget dock_content []
+  (overlay
+    (box :class "dock-bg" :hexpand true :vexpand true)
+    (box :class "dock-fg"
+         :orientation "v"
+         :space-evenly false
+         :vexpand true
+
+    ;; Top: Touch Launchers
+    (box :class "section"
+         :orientation "v"
+         :halign "center"
+         :space-evenly false
+      (button :class "hit-btn"
+              :onclick "rofi -show drun &"
+        (box :class "pill pill-tall" :orientation "v" :halign "center" :valign "center"
+          (label :class "icon-launcher nf-apps c-blue" :halign "center" :text "\U000f003b")))
+      (button :class "hit-btn"
+              :onclick "if command -v xfce4-terminal >/dev/null 2>&1; then xfce4-terminal & else alacritty & fi"
+        (box :class "pill pill-tall" :orientation "v" :halign "center" :valign "center"
+          (label :class "icon-lg nf-term c-teal" :halign "center" :text "\uf120")))
+      (button :class "hit-btn"
+              :onclick "rofi -show window &"
+        (box :class "pill pill-tall" :orientation "v" :halign "center" :valign "center"
+          (label :class "icon-lg nf-win c-mauve" :halign "center" :text "\uf2d2"))))
+
+    (box :class "divider" :halign "center")
+
+    ;; Middle: Workspaces 1-6 + Layout Toggle
+    (box :class "section"
+         :orientation "v"
+         :halign "center"
+         :space-evenly false
+      (box :orientation "v" :space-evenly false
+        (for ws in {bspwm_state.desktops}
+          (button :class "ws-hit"
+                  :onclick "bspc desktop -f '^${ws.num}'"
+            (box :class "ws-pill ${ws.focused ? 'focused' : (ws.urgent ? 'urgent' : (ws.occupied ? 'occupied' : 'empty'))}"
+                 :orientation "h"
+                 :halign "fill"
+                 :valign "center"
+                 :hexpand true
+              (box :halign "center" :valign "center" :hexpand true :space-evenly false :spacing 6
+                (label :class "ws-num" :text {ws.num})
+                (box :visible {ws.occupied && !ws.focused} :class "ws-dot" :valign "center"))))))
+      (button :class "hit-btn"
+              :onclick "bspc desktop -l next"
+        (box :class "pill pill-std" :orientation "v" :halign "center" :valign "center" :space-evenly false :spacing 2
+          (label :class "icon-md nf-layout ${bspwm_state.layout == 'M' ? 'c-mauve' : 'c-subtext'}"
+                 :halign "center"
+                 :text {bspwm_state.layout == "M" ? "\U000f056e" : "\U000f0573"})
+          (label :class "subtext" :halign "center" :text {bspwm_state.layout}))))
+
+    (button :class "drawer-toggle-hit"
+            :vexpand true
+            :hexpand true
+            :onclick "~/.config/eww/scripts/toggle_window.sh widget_drawer widgets_open &"
+      (box :class "swipe-zone" :orientation "v" :vexpand true :halign "center" :valign "center" :space-evenly false :spacing 6
+        (label :class "swipe-chev ${widgets_open ? 'c-blue' : 'c-subtext'}"
+               :text {widgets_open ? "\U000f0141" : "\U000f0142"})
+        (box :class "swipe-pill ${widgets_open ? 'swipe-pill-open' : ''}" :halign "center")))
+
+    (box :class "divider" :halign "center")
+
+    ;; Bottom: Window Controls + Audio + Session Power
+    (box :class "section"
+         :orientation "v"
+         :halign "center"
+         :space-evenly false
+      (button :class "hit-btn"
+              :onclick "bspc node -t ~floating"
+        (box :class "pill pill-std" :orientation "v" :halign "center" :valign "center"
+          (label :class "icon-win nf-float c-text" :halign "center" :text "\uf2d0")))
+      (button :class "hit-btn"
+              :onclick "bspc node -t ~fullscreen"
+        (box :class "pill pill-std" :orientation "v" :halign "center" :valign "center"
+          (label :class "icon-win nf-full c-text" :halign "center" :text "\uf065")))
+      (button :class "hit-btn"
+              :onclick "bspc node -c"
+        (box :class "pill pill-std" :orientation "v" :halign "center" :valign "center"
+          (label :class "icon-close c-red" :halign "center" :text "\uf00d")))
+
+      (box :class "divider" :halign "center")
+
+      (button :class "hit-btn"
+              :onclick "pactl set-sink-volume @DEFAULT_SINK@ +5% && eww update audio_state=\\"$(~/.config/eww/scripts/audio_state.sh)\\""
+        (box :class "pill pill-sm" :orientation "v" :halign "center" :valign "center"
+          (label :class "icon-md nf-md c-text" :halign "center" :text "\U000f0415")))
+      (button :class "hit-btn"
+              :onclick "pactl set-sink-mute @DEFAULT_SINK@ toggle && eww update audio_state=\\"$(~/.config/eww/scripts/audio_state.sh)\\""
+        (box :class "pill pill-std pill-vol" :orientation "v" :halign "center" :valign "center" :space-evenly false :spacing 0
+          (label :class "icon-vol nf-md ${audio_state.muted ? 'c-red' : 'c-green'}"
+                 :halign "center"
+                 :text {audio_state.muted ? "\U000f075f" : "\U000f057e"})
+          (label :class "subtext vol-pct" :halign "center" :text {audio_state.muted ? "MUTE" : "${audio_state.pct}%"})))
+      (button :class "hit-btn"
+              :onclick "pactl set-sink-volume @DEFAULT_SINK@ -5% && eww update audio_state=\\"$(~/.config/eww/scripts/audio_state.sh)\\""
+        (box :class "pill pill-sm" :orientation "v" :halign "center" :valign "center"
+          (label :class "icon-md nf-md c-text" :halign "center" :text "\U000f0374")))
+
+      (button :class "hit-btn"
+              :onclick "~/.config/eww/scripts/toggle_window.sh session_menu session_open &"
+        (box :class "pill pill-pwr ${session_open ? 'pwr-open' : ''}" :orientation "v" :halign "center" :valign "center"
+          (label :class "icon-close nf-pwr ${session_open ? 'c-dark' : 'c-red'}" :halign "center" :text "\uf011")))))))
+
+(defwidget session_content []
+  (box :class "popup-bg"
+       :orientation "v"
+       :space-evenly false
+    (button :class "pop-hit"
+            :onclick "~/.config/eww/scripts/toggle_window.sh close session_menu session_open; ~/.config/polybar/launch.sh & ~/.config/eww/launch.sh &"
+      (box :class "pop-pill" :orientation "h" :halign "fill" :valign "center" :space-evenly false :spacing 16
+        (label :class "pop-icon c-blue" :halign "center" :text "\uf021")
+        (label :class "pop-label c-text" :text "Reload Bars")))
+    (button :class "pop-hit"
+            :onclick "~/.config/eww/scripts/toggle_window.sh close session_menu session_open; bspc wm -r"
+      (box :class "pop-pill" :orientation "h" :halign "fill" :valign "center" :space-evenly false :spacing 16
+        (label :class "pop-icon c-teal" :halign "center" :text "\uf021")
+        (label :class "pop-label c-text" :text "Restart WM")))
+    (button :class "pop-hit"
+            :onclick "~/.config/eww/scripts/toggle_window.sh close session_menu session_open; bspc quit"
+      (box :class "pop-pill" :orientation "h" :halign "fill" :valign "center" :space-evenly false :spacing 16
+        (label :class "pop-icon nf-pwr c-red" :halign "center" :text "\uf011")
+        (label :class "pop-label c-text" :text "Exit X11")))))
+
+(defwidget cal_cell [day cls]
+  (box :class "cal-cell ${cls}" :halign "center" :valign "center" :hexpand true
+    (label :class "cal-num" :text day)))
+
+(defwidget widgets_content []
+  (box :class "drawer-bg"
+       :orientation "v"
+       :space-evenly false
+       :vexpand true
+       :spacing 20
+
+    ;; Header
+    (box :orientation "h" :halign "fill" :space-evenly false
+      (box :orientation "h" :halign "start" :hexpand true :space-evenly false :spacing 14
+        (label :class "drawer-title-icon c-blue" :text "\U000f003b")
+        (label :class "drawer-title c-text" :text "Widgets"))
+      (button :class "drawer-close"
+              :onclick "~/.config/eww/scripts/toggle_window.sh close widget_drawer widgets_open &"
+        (box :class "drawer-close-pill" :halign "center" :valign "center"
+          (label :class "c-subtext" :text "\uf00d"))))
+
+    ;; Quick Widget Spaces Row (Weather + Focus mockups)
+    (box :orientation "h" :spacing 18 :halign "fill"
+      (box :class "card card-sm" :orientation "v" :space-evenly false :spacing 8 :hexpand true
+        (box :orientation "h" :space-evenly false :spacing 12
+          (label :class "w-icon c-peach" :text "\U000f0599")
+          (label :class "w-val c-text" :text "22°C"))
+        (label :class "w-sub c-subtext" :halign "start" :text "Clear Sky · Feels 21°C"))
+      (box :class "card card-sm" :orientation "v" :space-evenly false :spacing 8 :hexpand true
+        (box :orientation "h" :space-evenly false :spacing 12
+          (label :class "w-icon c-teal" :text "\U000f05a9")
+          (label :class "w-val c-text" :text "Termux"))
+        (label :class "w-sub c-subtext" :halign "start" :text "Do Not Disturb · On")))
+
+    ;; Spotify Card Space (Mockup)
+    (box :class "card" :orientation "v" :space-evenly false :spacing 18
+      (box :orientation "h" :space-evenly false :spacing 20
+        (box :class "sp-art" :halign "center" :valign "center"
+          (label :class "sp-art-icon c-green" :halign "center" :text "\U000f04c7"))
+        (box :orientation "v" :valign "center" :hexpand true :space-evenly false :spacing 6
+          (label :class "sp-kicker c-green" :halign "start" :text "NOW PLAYING")
+          (label :class "sp-title c-text" :halign "start" :text "Midnight City")
+          (label :class "sp-artist c-subtext" :halign "start" :text "M83 · Hurry Up, We're Dreaming")))
+      (box :orientation "v" :space-evenly false :spacing 8
+        (box :class "sp-track" :orientation "h" :space-evenly false
+          (box :class "sp-fill"))
+        (box :orientation "h" :halign "fill"
+          (label :class "sp-time c-subtext" :halign "start" :text "1:42")
+          (label :class "sp-time c-subtext" :halign "end" :text "3:55")))
+      (box :orientation "h" :halign "center" :spacing 40 :space-evenly false
+        (label :class "sp-ctrl c-subtext" :text "\U000f04ae")
+        (box :class "sp-play" :halign "center" :valign "center"
+          (label :class "sp-play-icon c-dark" :halign "center" :text "\U000f03e4"))
+        (label :class "sp-ctrl c-subtext" :text "\U000f04ad")))
+
+    ;; Calendar Space (Mockup)
+    (box :class "card" :orientation "v" :space-evenly false :spacing 14
+      (box :orientation "h" :halign "fill" :space-evenly false
+        (box :orientation "h" :halign "start" :hexpand true :space-evenly false :spacing 12
+          (label :class "cal-icon c-blue" :text "\U000f00ed")
+          (label :class "cal-month c-text" :text "November 2026"))
+        (label :class "cal-chev c-subtext" :text "\U000f0141   \U000f0142"))
+      (box :orientation "h" :halign "fill" :spacing 6
+        (cal_cell :day "Mo" :cls "cal-hdr")
+        (cal_cell :day "Tu" :cls "cal-hdr")
+        (cal_cell :day "We" :cls "cal-hdr")
+        (cal_cell :day "Th" :cls "cal-hdr")
+        (cal_cell :day "Fr" :cls "cal-hdr")
+        (cal_cell :day "Sa" :cls "cal-hdr")
+        (cal_cell :day "Su" :cls "cal-hdr"))
+      (box :orientation "h" :halign "fill" :spacing 6
+        (cal_cell :day "2" :cls "")
+        (cal_cell :day "3" :cls "")
+        (cal_cell :day "4" :cls "")
+        (cal_cell :day "5" :cls "")
+        (cal_cell :day "6" :cls "")
+        (cal_cell :day "7" :cls "cal-wknd")
+        (cal_cell :day "8" :cls "cal-wknd"))
+      (box :orientation "h" :halign "fill" :spacing 6
+        (cal_cell :day "9" :cls "")
+        (cal_cell :day "10" :cls "")
+        (cal_cell :day "11" :cls "")
+        (cal_cell :day "12" :cls "")
+        (cal_cell :day "13" :cls "")
+        (cal_cell :day "14" :cls "cal-wknd")
+        (cal_cell :day "15" :cls "cal-wknd"))
+      (box :orientation "h" :halign "fill" :spacing 6
+        (cal_cell :day "16" :cls "")
+        (cal_cell :day "17" :cls "cal-today")
+        (cal_cell :day "18" :cls "")
+        (cal_cell :day "19" :cls "")
+        (cal_cell :day "20" :cls "")
+        (cal_cell :day "21" :cls "cal-wknd")
+        (cal_cell :day "22" :cls "cal-wknd"))
+      (box :orientation "h" :halign "fill" :spacing 6
+        (cal_cell :day "23" :cls "")
+        (cal_cell :day "24" :cls "")
+        (cal_cell :day "25" :cls "")
+        (cal_cell :day "26" :cls "")
+        (cal_cell :day "27" :cls "")
+        (cal_cell :day "28" :cls "cal-wknd")
+        (cal_cell :day "29" :cls "cal-wknd"))
+      (box :orientation "h" :halign "fill" :spacing 6
+        (cal_cell :day "30" :cls "")
+        (cal_cell :day "1" :cls "cal-muted")
+        (cal_cell :day "2" :cls "cal-muted")
+        (cal_cell :day "3" :cls "cal-muted")
+        (cal_cell :day "4" :cls "cal-muted")
+        (cal_cell :day "5" :cls "cal-muted")
+        (cal_cell :day "6" :cls "cal-muted")))
+
+    ;; Agenda / Notes Space (Mockup)
+    (box :class "card" :orientation "v" :vexpand true :space-evenly false :spacing 14
+      (box :orientation "h" :space-evenly false :spacing 12
+        (label :class "cal-icon c-mauve" :text "\U000f039a")
+        (label :class "cal-month c-text" :text "Agenda"))
+      (box :class "note-row" :orientation "h" :space-evenly false :spacing 16
+        (label :class "note-time c-blue" :text "19:00")
+        (label :class "note-item c-text" :halign "start" :text "Build Termux X11 Dock"))
+      (box :class "note-row" :orientation "h" :space-evenly false :spacing 16
+        (label :class "note-time c-mauve" :text "21:30")
+        (label :class "note-item c-text" :halign "start" :text "Sync Dotfiles & GUI Rules"))
+      (box :class "note-row" :orientation "h" :space-evenly false :spacing 16
+        (label :class "note-time c-teal" :text "22:45")
+        (label :class "note-item c-text" :halign "start" :text "Wrap Up Workspace Widgets")))))
+
+(defwindow dock
+  :monitor 0
+  :geometry (geometry :x "0px"
+                      :y "80px"
+                      :width "128px"
+                      :height "94%"
+                      :anchor "top left")
+  :stacking "fg"
+  :windowtype "dock"
+  :wm-ignore false
+  :reserve (struts :distance "128px" :side "left")
+  (dock_content))
+
+(defwindow session_menu
+  :monitor 0
+  :geometry (geometry :x "140px"
+                      :y "0px"
+                      :width "330px"
+                      :height "368px"
+                      :anchor "bottom left")
+  :stacking "overlay"
+  :windowtype "dialog"
+  :wm-ignore true
+  :focusable false
+  (session_content))
+
+(defwindow widget_drawer
+  :monitor 0
+  :geometry (geometry :x "140px"
+                      :y "80px"
+                      :width "844px"
+                      :height "94%"
+                      :anchor "top left")
+  :stacking "overlay"
+  :windowtype "dialog"
+  :wm-ignore true
+  :focusable false
+  (widgets_content))
+"""
+
+EWW_SCSS = """$base: rgba(30, 30, 46, 0.90);
+$popup-base: rgba(30, 30, 46, 0.95);
+$surface: #313244;
+$surface1: #45475a;
+$text: #cdd6f4;
+$subtext: #a6adc8;
+$blue: #89b4fa;
+$mauve: #cba6f7;
+$teal: #94e2d5;
+$green: #a6e3a1;
+$peach: #fab387;
+$red: #f38ba8;
+$dark: #1e1e2e;
+
+* {
+  all: unset;
+  font-family: "JetBrainsMono Nerd Font";
+}
+
+window {
+  background-color: transparent;
+}
+
+.dock-bg {
+  margin-left: 12px;
+  border-radius: 24px;
+  background-color: $base;
+  border: 2px solid $surface;
+}
+
+.popup-bg {
+  margin-bottom: 36px;
+  padding: 9px 0px;
+  border-radius: 22px;
+  background-color: $popup-base;
+  border: 2px solid $surface1;
+}
+
+.dock-fg {
+  padding-top: 6px;
+  padding-bottom: 6px;
+}
+
+.divider {
+  min-width: 60px;
+  min-height: 2px;
+  margin-left: 12px;
+  margin-top: 4px;
+  margin-bottom: 4px;
+  border-radius: 1px;
+  background-color: $surface1;
+}
+
+/* Transparent padded button containers for enlarged touch hitboxes */
+.hit-btn {
+  padding: 6px 12px 6px 24px;
+  background-color: transparent;
+}
+
+.ws-hit {
+  padding: 7px 12px 7px 24px;
+  background-color: transparent;
+}
+
+.pop-hit {
+  padding: 9px 18px;
+  background-color: transparent;
+}
+
+.pill {
+  min-width: 92px;
+  border-radius: 18px;
+  background-color: $surface;
+  transition: background-color 100ms ease;
+}
+
+.pill-tall {
+  min-height: 66px;
+}
+
+.pill-std {
+  min-height: 56px;
+}
+
+.pill-sm {
+  min-height: 50px;
+}
+
+.pill-pwr {
+  min-height: 62px;
+}
+
+.pwr-open {
+  background-color: $red;
+}
+
+.ws-pill {
+  min-width: 92px;
+  min-height: 58px;
+  border-radius: 18px;
+  border: 1px solid transparent;
+  transition: background-color 100ms ease;
+}
+
+.ws-pill.focused {
+  background-color: $blue;
+}
+
+.ws-pill.urgent {
+  background-color: $red;
+}
+
+.ws-pill.occupied {
+  background-color: $surface;
+  border-color: $surface1;
+}
+
+.ws-pill.empty {
+  background-color: transparent;
+}
+
+.ws-num {
+  font-size: 24px;
+  color: $subtext;
+}
+
+.ws-pill.occupied .ws-num {
+  font-weight: bold;
+  color: $text;
+}
+
+.ws-pill.focused .ws-num,
+.ws-pill.urgent .ws-num {
+  font-weight: bold;
+  color: $dark;
+}
+
+.ws-dot {
+  min-width: 8px;
+  min-height: 8px;
+  border-radius: 99px;
+  background-color: $blue;
+}
+
+.pop-pill {
+  min-height: 86px;
+  padding-left: 20px;
+  padding-right: 20px;
+  border-radius: 16px;
+  background-color: $surface;
+  transition: background-color 100ms ease;
+}
+
+/* Active press feedback only (no sticky :hover state on touchscreens) */
+.hit-btn:active .pill,
+.ws-hit:active .ws-pill,
+.pop-hit:active .pop-pill {
+  background-color: $blue;
+}
+
+.hit-btn:active label,
+.ws-hit:active label,
+.pop-hit:active label {
+  color: $dark;
+}
+
+.icon-launcher { font-size: 34px; }
+.icon-lg { font-size: 30px; }
+.icon-close { font-size: 28px; }
+.icon-win { font-size: 26px; }
+.icon-md { font-size: 24px; }
+.icon-vol { font-size: 25px; margin-bottom: -5px; }
+.pill-vol { padding-top: 3px; }
+.vol-pct { font-size: 14px; font-weight: bold; color: $subtext; padding-bottom: 1px; }
+.subtext { font-size: 13px; font-weight: bold; color: $subtext; }
+
+/* Compensate Nerd Font double-width glyph overflow past Pango's 1-cell advance */
+.nf-apps { padding-right: 4px; }
+.nf-term { padding-right: 13px; }
+.nf-win { padding-right: 10px; }
+.nf-layout { padding-right: 4px; }
+.nf-float { padding-right: 8px; }
+.nf-full { padding-right: 5px; }
+.nf-md { padding-right: 4px; }
+.nf-pwr { padding-right: 6px; }
+
+.pop-icon { min-width: 34px; font-size: 26px; }
+.pop-label { font-size: 20px; font-weight: bold; }
+
+.c-blue { color: $blue; }
+.c-teal { color: $teal; }
+.c-mauve { color: $mauve; }
+.c-green { color: $green; }
+.c-peach { color: $peach; }
+.c-red { color: $red; }
+.c-text { color: $text; }
+.c-subtext { color: $subtext; }
+.c-dark { color: $dark; }
+
+/* Empty spacer drawer toggle handle */
+.drawer-toggle-hit {
+  background-color: transparent;
+}
+
+.swipe-zone {
+  margin-left: 12px;
+}
+
+.swipe-chev {
+  font-size: 16px;
+}
+
+.swipe-pill {
+  min-width: 6px;
+  min-height: 44px;
+  border-radius: 99px;
+  background-color: $surface1;
+  transition: background-color 100ms ease;
+}
+
+.swipe-pill-open,
+.drawer-toggle-hit:active .swipe-pill {
+  background-color: $blue;
+}
+
+.drawer-toggle-hit:active .swipe-chev {
+  color: $blue;
+}
+
+/* Exposed Widget Drawer & Mockup Cards */
+.drawer-bg {
+  min-width: 784px;
+  padding: 22px 28px;
+  border-radius: 24px;
+  background-color: $popup-base;
+  border: 2px solid $surface1;
+}
+
+.drawer-title-icon { font-size: 34px; }
+.drawer-title { font-size: 28px; font-weight: bold; }
+
+.drawer-close {
+  background-color: transparent;
+}
+
+.drawer-close-pill {
+  min-width: 54px;
+  min-height: 54px;
+  border-radius: 16px;
+  background-color: $surface;
+  font-size: 24px;
+}
+
+.drawer-close:active .drawer-close-pill {
+  background-color: $blue;
+}
+
+.drawer-close:active label {
+  color: $dark;
+}
+
+.card {
+  padding: 22px 24px;
+  border-radius: 20px;
+  background-color: $surface;
+  border: 1px solid $surface1;
+}
+
+.card-sm {
+  padding: 20px 22px;
+}
+
+.w-icon { font-size: 38px; padding-right: 4px; }
+.w-val { font-size: 32px; font-weight: bold; }
+.w-sub { font-size: 21px; }
+
+.sp-art {
+  min-width: 112px;
+  min-height: 112px;
+  border-radius: 18px;
+  background-color: $surface1;
+}
+
+.sp-art-icon {
+  font-size: 54px;
+  padding-right: 6px;
+}
+
+.sp-kicker { font-size: 16px; font-weight: bold; }
+.sp-title { font-size: 27px; font-weight: bold; }
+.sp-artist { font-size: 22px; }
+
+.sp-track {
+  min-height: 10px;
+  border-radius: 99px;
+  background-color: $surface1;
+}
+
+.sp-fill {
+  min-width: 340px;
+  min-height: 10px;
+  border-radius: 99px;
+  background-color: $green;
+}
+
+.sp-time { font-size: 19px; font-weight: bold; }
+.sp-ctrl { font-size: 32px; }
+
+.sp-play {
+  min-width: 62px;
+  min-height: 62px;
+  border-radius: 99px;
+  background-color: $green;
+}
+
+.sp-play-icon {
+  font-size: 30px;
+  padding-right: 2px;
+}
+
+.cal-icon { font-size: 28px; padding-right: 4px; }
+.cal-month { font-size: 24px; font-weight: bold; }
+.cal-chev { font-size: 24px; }
+
+.cal-cell {
+  min-width: 68px;
+  min-height: 46px;
+  border-radius: 14px;
+}
+
+.cal-num {
+  font-size: 23px;
+  color: $text;
+}
+
+.cal-hdr .cal-num {
+  font-size: 21px;
+  font-weight: bold;
+  color: $subtext;
+}
+
+.cal-wknd .cal-num {
+  color: $subtext;
+}
+
+.cal-muted .cal-num {
+  color: $surface1;
+}
+
+.cal-today {
+  background-color: $blue;
+}
+
+.cal-today .cal-num {
+  font-weight: bold;
+  color: $dark;
+}
+
+.note-row {
+  padding: 12px 16px;
+  border-radius: 14px;
+  background-color: $popup-base;
+  border: 1px solid $surface1;
+}
+
+.note-time { font-size: 21px; font-weight: bold; }
+.note-item { font-size: 21px; }
+"""
+
+QUICKSHELL_LAUNCH = """#!/data/data/com.termux/files/usr/bin/sh
+
+export BSPWM_SOCKET="${BSPWM_SOCKET:-${TMPDIR:-/data/data/com.termux/files/usr/tmp}/bspwm_0_0-socket}"
+export XCURSOR_THEME="${XCURSOR_THEME:-TouchDot-Mocha}"
+export XCURSOR_SIZE="${XCURSOR_SIZE:-32}"
+export XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-${TMPDIR:-/data/data/com.termux/files/usr/tmp}}"
+export GALLIUM_DRIVER="${GALLIUM_DRIVER:-virpipe}"
+
+# Wait briefly for VirGL socket on cold X11 startup, then use GPU OpenGL RHI (-> ANGLE -> Vulkan)
+if pgrep -x virgl_test_serv >/dev/null 2>&1; then
+  i=0
+  while [ "$i" -lt 20 ] && [ ! -S "$XDG_RUNTIME_DIR/.virgl_test" ]; do
+    i=$((i + 1))
+    sleep 0.05
+  done
+fi
+
+if [ -S "$XDG_RUNTIME_DIR/.virgl_test" ]; then
+  unset QT_QUICK_BACKEND
+  export QSG_RHI_BACKEND="${QSG_RHI_BACKEND:-opengl}"
+  # Mesa virpipe is not thread-safe across concurrent Qt Quick render threads
+  export QSG_RENDER_LOOP="${QSG_RENDER_LOOP:-basic}"
+else
+  export QT_QUICK_BACKEND="${QT_QUICK_BACKEND:-software}"
+fi
+
+[ -f "${TMPDIR:-/data/data/com.termux/files/usr/tmp}/qs-watch.pid" ] && kill "$(cat "${TMPDIR:-/data/data/com.termux/files/usr/tmp}/qs-watch.pid")" 2>/dev/null || true
+rm -f "${TMPDIR:-/data/data/com.termux/files/usr/tmp}/qs-watch.pid"
+
+pkill -x quickshell 2>/dev/null || true
+while pgrep -u "$(id -u)" -x quickshell >/dev/null 2>&1; do
+  sleep 0.2
+done
+
+LOG="${TMPDIR:-/data/data/com.termux/files/usr/tmp}/quickshell.log"
+quickshell >> "$LOG" 2>&1 &
+bspc config left_padding 128 >/dev/null 2>&1 || true
+"""
+
+QUICKSHELL_WAYLAND_LAUNCH = """#!/data/data/com.termux/files/usr/bin/sh
+
+export QT_QPA_PLATFORM=wayland
+export QT_QUICK_BACKEND=software
+export XCURSOR_THEME="${XCURSOR_THEME:-TouchDot-Mocha}"
+export XCURSOR_SIZE="${XCURSOR_SIZE:-32}"
+export XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-${TMPDIR:-/data/data/com.termux/files/usr/tmp}}"
+
+# Match nested wlroots X11-1 window to the full outer Termux:X11 display size
+if [ "${WLR_BACKENDS:-x11}" = "x11" ]; then
+  python3 - <<'PY' >/dev/null 2>&1 || true
+import os, subprocess
+from ctypes import CDLL, POINTER, Structure, byref, c_int, c_long, c_uint, c_ulong, c_void_p
+
+class XWA(Structure):
+    _fields_ = [
+        ("x", c_int), ("y", c_int), ("width", c_int), ("height", c_int),
+        ("border_width", c_int), ("depth", c_int), ("visual", c_void_p),
+        ("root", c_ulong), ("c_class", c_int), ("bit_gravity", c_int),
+        ("win_gravity", c_int), ("backing_store", c_int),
+        ("backing_planes", c_long), ("backing_pixel", c_long),
+        ("save_under", c_int), ("colormap", c_ulong), ("map_installed", c_int),
+        ("map_state", c_int), ("all_event_masks", c_long), ("your_event_mask", c_long),
+        ("do_not_propagate_mask", c_long), ("override_redirect", c_int), ("screen", c_void_p),
+    ]
+
+disp = os.environ.get("TERMUX_X11_DISPLAY") or os.environ.get("DISPLAY") or ":0"
+x11 = CDLL("libX11.so.6")
+x11.XOpenDisplay.restype = c_void_p
+dpy = x11.XOpenDisplay(disp.encode())
+if dpy:
+    x11.XDefaultRootWindow.restype = c_ulong
+    x11.XDefaultRootWindow.argtypes = [c_void_p]
+    x11.XGetWindowAttributes.argtypes = [c_void_p, c_ulong, POINTER(XWA)]
+    x11.XQueryTree.argtypes = [c_void_p, c_ulong, POINTER(c_ulong), POINTER(c_ulong), POINTER(POINTER(c_ulong)), POINTER(c_uint)]
+    x11.XMoveResizeWindow.argtypes = [c_void_p, c_ulong, c_int, c_int, c_uint, c_uint]
+    x11.XFree.argtypes = [c_void_p]
+    x11.XFlush.argtypes = [c_void_p]
+    x11.XCloseDisplay.argtypes = [c_void_p]
+    root = x11.XDefaultRootWindow(dpy)
+    ra = XWA()
+    if x11.XGetWindowAttributes(dpy, root, byref(ra)) and ra.width > 0 and ra.height > 0:
+        if os.environ.get("SWAYSOCK"):
+            subprocess.run(["swaymsg", "output", "X11-1", "resolution", f"{ra.width}x{ra.height}"], check=False)
+        else:
+            r, p, ch, n = c_ulong(), c_ulong(), POINTER(c_ulong)(), c_uint()
+            if x11.XQueryTree(dpy, root, byref(r), byref(p), byref(ch), byref(n)):
+                try:
+                    for i in range(n.value):
+                        a = XWA()
+                        if x11.XGetWindowAttributes(dpy, ch[i], byref(a)) and a.map_state == 2 and a.width == 1024 and a.height == 768:
+                            x11.XMoveResizeWindow(dpy, ch[i], 0, 0, ra.width, ra.height)
+                            x11.XFlush(dpy)
+                finally:
+                    if ch:
+                        x11.XFree(ch)
+    x11.XCloseDisplay(dpy)
+PY
+fi
+
+pkill -x quickshell 2>/dev/null || true
+while pgrep -u "$(id -u)" -x quickshell >/dev/null 2>&1; do
+  sleep 0.2
+done
+
+LOG="${TMPDIR:-/data/data/com.termux/files/usr/tmp}/quickshell-wayland.log"
+quickshell -p "${XDG_CONFIG_HOME:-$HOME/.config}/quickshell/wayland.qml" >> "$LOG" 2>&1 &
+"""
+
+QUICKSHELL_SUBMENU_WATCH_PY = """#!/data/data/com.termux/files/usr/bin/python3
+\"\"\"Watch X11 clicks, focus changes, and foreign popups to auto-close Quickshell submenus.\"\"\"
+
+import os
+import select
+import signal
+import sys
+import time
+from ctypes import CDLL, POINTER, Structure, byref, c_char, c_int, c_long, c_ubyte, c_uint, c_ulong, c_void_p
+
+
+class XWA(Structure):
+    _fields_ = [
+        ("x", c_int), ("y", c_int), ("width", c_int), ("height", c_int),
+        ("border_width", c_int), ("depth", c_int), ("visual", c_void_p),
+        ("root", c_ulong), ("c_class", c_int), ("bit_gravity", c_int),
+        ("win_gravity", c_int), ("backing_store", c_int),
+        ("backing_planes", c_long), ("backing_pixel", c_long),
+        ("save_under", c_int), ("colormap", c_ulong), ("map_installed", c_int),
+        ("map_state", c_int), ("all_event_masks", c_long), ("your_event_mask", c_long),
+        ("do_not_propagate_mask", c_long), ("override_redirect", c_int), ("screen", c_void_p),
+    ]
+
+
+class XIEventMask(Structure):
+    _fields_ = [("deviceid", c_int), ("mask_len", c_int), ("mask", POINTER(c_ubyte))]
+
+
+def _point_in(px: int, py: int, rect) -> bool:
+    x, y, w, h = rect
+    return w > 0 and h > 0 and x <= px < x + w and y <= py < y + h
+
+
+def _matches_rect(a, rect, tol: int = 16) -> bool:
+    rx, ry, rw, rh = rect
+    return rw > 0 and rh > 0 and abs(a.x - rx) <= tol and abs(a.y - ry) <= tol and abs(a.width - rw) <= tol and abs(a.height - rh) <= tol
+
+
+def _has_foreign_popup(x11, dpy, root, own_rects) -> bool:
+    r, p, ch, n = c_ulong(), c_ulong(), POINTER(c_ulong)(), c_uint()
+    if not x11.XQueryTree(dpy, root, byref(r), byref(p), byref(ch), byref(n)):
+        return False
+    try:
+        for i in range(n.value):
+            a = XWA()
+            if not x11.XGetWindowAttributes(dpy, ch[i], byref(a)) or a.map_state != 2:
+                continue
+            if a.override_redirect == 1 and a.width >= 200 and a.height >= 150:
+                if not any(_matches_rect(a, rect) for rect in own_rects):
+                    return True
+    finally:
+        if ch:
+            x11.XFree(ch)
+    return False
+
+
+def main() -> int:
+    # Args: dock_w dock_h sub_x sub_y sub_w sub_h
+    args = [int(float(v)) for v in sys.argv[1:7]] if len(sys.argv) >= 7 else [128, 1508, 140, 80, 844, 1508]
+    dock_w, dock_h, sub_x, sub_y, sub_w, sub_h = args
+    dock_rect = (0, 80, dock_w, dock_h)
+    sub_rect = (sub_x, sub_y, sub_w, sub_h)
+    own_rects = [dock_rect, sub_rect]
+
+    x11 = CDLL("libX11.so.6")
+    xi = CDLL("libXi.so")
+
+    x11.XOpenDisplay.restype = c_void_p
+    x11.XOpenDisplay.argtypes = [c_void_p]
+    x11.XDefaultRootWindow.restype = c_ulong
+    x11.XDefaultRootWindow.argtypes = [c_void_p]
+    x11.XConnectionNumber.restype = c_int
+    x11.XConnectionNumber.argtypes = [c_void_p]
+    x11.XPending.restype = c_int
+    x11.XPending.argtypes = [c_void_p]
+    x11.XNextEvent.argtypes = [c_void_p, c_void_p]
+    x11.XFlush.argtypes = [c_void_p]
+    x11.XQueryTree.restype = c_int
+    x11.XQueryTree.argtypes = [c_void_p, c_ulong, POINTER(c_ulong), POINTER(c_ulong), POINTER(POINTER(c_ulong)), POINTER(c_uint)]
+    x11.XGetWindowAttributes.restype = c_int
+    x11.XGetWindowAttributes.argtypes = [c_void_p, c_ulong, POINTER(XWA)]
+    x11.XGetInputFocus.argtypes = [c_void_p, POINTER(c_ulong), POINTER(c_int)]
+    x11.XQueryPointer.restype = c_int
+    x11.XQueryPointer.argtypes = [
+        c_void_p, c_ulong, c_void_p, c_void_p,
+        c_void_p, c_void_p, c_void_p, c_void_p, c_void_p,
+    ]
+    x11.XFree.argtypes = [c_void_p]
+    x11.XCloseDisplay.argtypes = [c_void_p]
+
+    xi.XIQueryVersion.argtypes = [c_void_p, POINTER(c_int), POINTER(c_int)]
+    xi.XISelectEvents.argtypes = [c_void_p, c_ulong, POINTER(XIEventMask), c_int]
+
+    dpy = x11.XOpenDisplay(os.environ.get("DISPLAY", ":0").encode())
+    if not dpy:
+        return 1
+    root = x11.XDefaultRootWindow(dpy)
+    xfd = x11.XConnectionNumber(dpy)
+
+    maj, minv = c_int(2), c_int(2)
+    xi.XIQueryVersion(dpy, byref(maj), byref(minv))
+
+    # XIAllMasterDevices = 1; XI_RawButtonPress = 15 (1 << 15 -> byte 1 bit 7 = 0x80)
+    ev_mask = (c_ubyte * 4)(0, 0x80, 0, 0)
+    em = XIEventMask(deviceid=1, mask_len=4, mask=ev_mask)
+    xi.XISelectEvents(dpy, root, byref(em), 1)
+    x11.XFlush(dpy)
+
+    running = True
+
+    def stop(_sig, _frame):
+        nonlocal running
+        running = False
+
+    signal.signal(signal.SIGTERM, stop)
+    signal.signal(signal.SIGINT, stop)
+
+    pid_path = os.path.join(
+        os.environ.get("TMPDIR", "/data/data/com.termux/files/usr/tmp"),
+        "qs-watch.pid",
+    )
+    try:
+        with open(pid_path, "w") as pf:
+            pf.write(str(os.getpid()))
+    except OSError:
+        pid_path = ""
+
+    focus_win, revert_to = c_ulong(), c_int()
+    x11.XGetInputFocus(dpy, byref(focus_win), byref(revert_to))
+    initial_focus = focus_win.value
+
+    r_win, c_win = c_ulong(), c_ulong()
+    rx, ry, wx, wy = c_int(), c_int(), c_int(), c_int()
+    mask = c_uint()
+    ev_buf = (c_char * 192)()
+    start_t = time.monotonic()
+
+    while running:
+        readable, _, _ = select.select([xfd], [], [], 0.12)
+        clicked = False
+        if readable:
+            while x11.XPending(dpy) > 0:
+                x11.XNextEvent(dpy, ev_buf)
+                clicked = True
+
+        x11.XGetInputFocus(dpy, byref(focus_win), byref(revert_to))
+        if (focus_win.value != initial_focus and focus_win.value not in (0, 1)) or _has_foreign_popup(x11, dpy, root, own_rects):
+            print("CLOSE", flush=True)
+            break
+
+        if clicked and (time.monotonic() - start_t) >= 0.08:
+            if x11.XQueryPointer(dpy, root, byref(r_win), byref(c_win), byref(rx), byref(ry), byref(wx), byref(wy), byref(mask)):
+                px, py = rx.value, ry.value
+                in_sub = _point_in(px, py, sub_rect)
+                in_dock = _point_in(px, py, dock_rect)
+                on_toggle = in_dock and (
+                    (80 + int(dock_h * 0.45) <= py <= 80 + int(dock_h * 0.70))
+                    or (py >= 80 + dock_h - 90)
+                )
+                if not in_sub and not on_toggle:
+                    print("CLOSE", flush=True)
+                    break
+
+    if pid_path:
+        try:
+            os.remove(pid_path)
+        except OSError:
+            pass
+    x11.XCloseDisplay(dpy)
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
+"""
+
+QUICKSHELL_SYS_DIAG_PY = """#!/data/data/com.termux/files/usr/bin/python3
+\"\"\"Stream CPU, RAM, battery/thermal, and Wi-Fi diagnostics as JSON lines for Quickshell.\"\"\"
+
+import json
+import os
+import shutil
+import signal
+import subprocess
+import sys
+import time
+
+
+def _total_jiffies() -> int:
+    total = 0
+    for name in os.listdir("/proc"):
+        if not name.isdigit():
+            continue
+        try:
+            with open(f"/proc/{name}/stat") as f:
+                data = f.read()
+            rp = data.rfind(")")
+            if rp < 0:
+                continue
+            fields = data[rp + 2 :].split()
+            total += int(fields[11]) + int(fields[12])
+        except (OSError, IndexError, ValueError):
+            pass
+    return total
+
+
+def _mem_info() -> tuple[str, str, int]:
+    vals = {}
+    try:
+        with open("/proc/meminfo") as f:
+            for line in f:
+                k, _, rest = line.partition(":")
+                if k in ("MemTotal", "MemAvailable", "MemFree"):
+                    parts = rest.strip().split()
+                    if parts:
+                        vals[k] = int(parts[0])
+    except OSError:
+        return "0.0", "0.0", 0
+    tot_kb = vals.get("MemTotal", 0)
+    avail_kb = vals.get("MemAvailable", vals.get("MemFree", 0))
+    if tot_kb <= 0:
+        return "0.0", "0.0", 0
+    used_kb = max(0, tot_kb - avail_kb)
+    pct = min(100, max(0, round(used_kb / tot_kb * 100)))
+    return f"{used_kb / 1048576:.1f}", f"{tot_kb / 1048576:.1f}", pct
+
+
+def _run_json(cmd: list[str], timeout_s: float = 2.0) -> dict | None:
+    if not shutil.which(cmd[0]):
+        return None
+    try:
+        res = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout_s)
+        if res.returncode == 0 and res.stdout.strip():
+            return json.loads(res.stdout)
+    except (OSError, subprocess.SubprocessError, json.JSONDecodeError):
+        pass
+    return None
+
+
+def main() -> int:
+    running = True
+
+    def stop(_sig, _frame):
+        nonlocal running
+        running = False
+
+    signal.signal(signal.SIGTERM, stop)
+    signal.signal(signal.SIGINT, stop)
+
+    clk = os.sysconf("SC_CLK_TCK")
+    ncpu = os.cpu_count() or 1
+    j_prev = _total_jiffies()
+    t_prev = time.monotonic()
+
+    bat = {"bat_pct": -1, "bat_status": "UNKNOWN", "temp_c": None, "watts": ""}
+    wifi = {"wifi_ok": False, "wifi_rate": 0, "wifi_rssi": 0, "ip": ""}
+
+    time.sleep(0.25)
+    tick = 0
+    while running:
+        j_now = _total_jiffies()
+        t_now = time.monotonic()
+        dt = max(0.05, t_now - t_prev)
+        cpu_pct = min(100, max(0, round(((j_now - j_prev) / clk) / (dt * ncpu) * 100.0)))
+        j_prev, t_prev = j_now, t_now
+
+        mem_used, mem_total, mem_pct = _mem_info()
+
+        # Refresh Termux:API battery & Wi-Fi every ~12s (and immediately on tick 0)
+        if tick % 6 == 0:
+            bdata = _run_json(["termux-battery-status"])
+            if bdata:
+                bat["bat_pct"] = int(bdata.get("percentage", -1))
+                bat["bat_status"] = str(bdata.get("status", "UNKNOWN")).upper()
+                if "temperature" in bdata:
+                    try:
+                        bat["temp_c"] = round(float(bdata["temperature"]), 1)
+                    except (TypeError, ValueError):
+                        pass
+                try:
+                    mv = float(bdata.get("voltage", 0))
+                    ua = float(bdata.get("current", 0))
+                    w = (mv / 1000.0) * (ua / 1_000_000.0)
+                    bat["watts"] = f"{w:+.1f}W" if abs(w) >= 0.1 else ""
+                except (TypeError, ValueError):
+                    bat["watts"] = ""
+
+            wdata = _run_json(["termux-wifi-connectioninfo"])
+            if wdata:
+                state = str(wdata.get("supplicant_state", "")).upper()
+                wifi["wifi_ok"] = (state == "COMPLETED" and bool(wdata.get("ip")))
+                wifi["wifi_rate"] = int(wdata.get("link_speed_mbps", 0) or 0)
+                wifi["wifi_rssi"] = int(wdata.get("rssi", 0) or 0)
+                wifi["ip"] = str(wdata.get("ip", "") or "")
+
+        payload = {
+            "cpu": cpu_pct,
+            "mem_used": mem_used,
+            "mem_total": mem_total,
+            "mem_pct": mem_pct,
+            **bat,
+            **wifi,
+        }
+        print(json.dumps(payload), flush=True)
+
+        tick += 1
+        for _ in range(20):
+            if not running:
+                break
+            time.sleep(0.1)
+
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
+"""
+
+QUICKSHELL_WL_WORKSPACES_PY = """#!/data/data/com.termux/files/usr/bin/python3
+\"\"\"Stream and control ext_workspace_manager_v1 virtual desktops (LabWC) over Wayland wire protocol.\"\"\"
+
+import json
+import os
+import select
+import signal
+import socket
+import struct
+import sys
+
+
+def _pack_str(s: str) -> bytes:
+    b = s.encode("utf-8") + b"\\x00"
+    pad = (-len(b)) & 3
+    return struct.pack("<I", len(b)) + b + (b"\\x00" * pad)
+
+
+def _unpack_str(buf: bytes, off: int) -> tuple[str, int]:
+    (slen,) = struct.unpack_from("<I", buf, off)
+    raw = buf[off + 4 : off + 4 + max(0, slen - 1)]
+    step = 4 + ((slen + 3) & ~3)
+    return raw.decode("utf-8", errors="replace"), off + step
+
+
+def _msg(obj_id: int, opcode: int, payload: bytes = b"") -> bytes:
+    size = 8 + len(payload)
+    return struct.pack("<II", obj_id, (size << 16) | opcode) + payload
+
+
+def main() -> int:
+    xdg = os.environ.get("XDG_RUNTIME_DIR", os.environ.get("TMPDIR", "/data/data/com.termux/files/usr/tmp"))
+    wdisp = os.environ.get("WAYLAND_DISPLAY", "wayland-0")
+    sock_path = wdisp if os.path.isabs(wdisp) else os.path.join(xdg, wdisp)
+
+    sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    sock.connect(sock_path)
+
+    # 1 = wl_display, 2 = wl_registry, 3 = initial sync callback
+    sock.sendall(_msg(1, 1, struct.pack("<I", 2)) + _msg(1, 0, struct.pack("<I", 3)))
+
+    mgr_id = 0
+    mgr_ver = 1
+    workspaces: dict[int, dict] = {}
+    groups: set[int] = set()
+    rx = bytearray()
+    in_buf = ""
+    running = True
+
+    def stop(_sig, _frame):
+        nonlocal running
+        running = False
+
+    signal.signal(signal.SIGTERM, stop)
+    signal.signal(signal.SIGINT, stop)
+
+    def emit_state() -> None:
+        by_num: dict[int, dict] = {}
+        ordered = []
+        for ws in workspaces.values():
+            name = ws.get("name", "")
+            st = ws.get("state", 0)
+            if st & 4:  # hidden
+                continue
+            item = {
+                "name": name,
+                "focused": bool(st & 1),
+                "urgent": bool(st & 2),
+                "occupied": False,
+            }
+            ordered.append(item)
+            if name.isdigit():
+                by_num[int(name)] = item
+        out = []
+        if by_num:
+            for n in range(1, 7):
+                w = by_num.get(n)
+                out.append({
+                    "num": n,
+                    "focused": w["focused"] if w else False,
+                    "occupied": False,
+                    "urgent": w["urgent"] if w else False,
+                })
+        else:
+            for idx, w in enumerate(ordered[:6], 1):
+                out.append({
+                    "num": idx,
+                    "focused": w["focused"],
+                    "occupied": False,
+                    "urgent": w["urgent"],
+                })
+        if out:
+            print(json.dumps(out), flush=True)
+
+    stdin_fd = sys.stdin.fileno()
+    os.set_blocking(stdin_fd, False)
+
+    while running:
+        rlist, _, _ = select.select([sock, stdin_fd], [], [], 0.5)
+        if sock in rlist:
+            chunk = sock.recv(8192)
+            if not chunk:
+                break
+            rx.extend(chunk)
+            while len(rx) >= 8:
+                obj_id, size_op = struct.unpack_from("<II", rx, 0)
+                size = size_op >> 16
+                op = size_op & 0xFFFF
+                if size < 8 or len(rx) < size:
+                    break
+                payload = bytes(rx[8:size])
+                del rx[:size]
+
+                if obj_id == 2 and op == 0:  # wl_registry::global
+                    (gname,) = struct.unpack_from("<I", payload, 0)
+                    iface, off = _unpack_str(payload, 4)
+                    (gver,) = struct.unpack_from("<I", payload, off)
+                    if iface == "ext_workspace_manager_v1" and mgr_id == 0:
+                        mgr_id = 4
+                        mgr_ver = min(1, gver)
+                        sock.sendall(_msg(2, 0, struct.pack("<I", gname) + _pack_str(iface) + struct.pack("<II", mgr_ver, mgr_id)))
+                elif obj_id == mgr_id:
+                    if op == 0:  # workspace_group(new_id)
+                        (gid,) = struct.unpack_from("<I", payload, 0)
+                        groups.add(gid)
+                    elif op == 1:  # workspace(new_id)
+                        (wid,) = struct.unpack_from("<I", payload, 0)
+                        workspaces[wid] = {"name": "", "state": 0}
+                    elif op == 2:  # done
+                        emit_state()
+                    elif op == 3:  # finished
+                        running = False
+                        break
+                elif obj_id in workspaces:
+                    if op == 1:  # name(string)
+                        name, _ = _unpack_str(payload, 0)
+                        workspaces[obj_id]["name"] = name
+                    elif op == 3:  # state(uint)
+                        (st,) = struct.unpack_from("<I", payload, 0)
+                        workspaces[obj_id]["state"] = st
+                    elif op == 5:  # removed
+                        workspaces.pop(obj_id, None)
+
+        if stdin_fd in rlist:
+            try:
+                data = os.read(stdin_fd, 1024)
+            except BlockingIOError:
+                data = b""
+            if not data:
+                break
+            in_buf += data.decode("utf-8", errors="ignore")
+            while "\\n" in in_buf:
+                line, in_buf = in_buf.split("\\n", 1)
+                target = line.strip()
+                if not target or not mgr_id:
+                    continue
+                for wid, ws in workspaces.items():
+                    if ws.get("name") == target:
+                        # activate (opcode 1) + manager::commit (opcode 0)
+                        sock.sendall(_msg(wid, 1) + _msg(mgr_id, 0))
+                        break
+
+    sock.close()
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
+"""
+
+QUICKSHELL_QML = """import Quickshell
+import Quickshell.Io
+import QtQuick
+import QtQuick.Layouts
+
+ShellRoot {
+    id: root
+
+    property var desktopStates: [
+        { num: 1, focused: true, occupied: false, urgent: false },
+        { num: 2, focused: false, occupied: false, urgent: false },
+        { num: 3, focused: false, occupied: false, urgent: false },
+        { num: 4, focused: false, occupied: false, urgent: false },
+        { num: 5, focused: false, occupied: false, urgent: false },
+        { num: 6, focused: false, occupied: false, urgent: false }
+    ]
+    property string layoutMode: "T"
+    property int volumePct: 50
+    property bool muted: false
+
+    property bool sessionOpen: false
+    property bool sessionActive: false
+    property bool widgetsOpen: false
+    property bool widgetsActive: false
+
+    readonly property color colBase: "#e61e1e2e"
+    readonly property color colPopupBase: "#f21e1e2e"
+    readonly property color colSurface: "#313244"
+    readonly property color colSurface1: "#45475a"
+    readonly property color colText: "#cdd6f4"
+    readonly property color colSubtext: "#a6adc8"
+    readonly property color colBlue: "#89b4fa"
+    readonly property color colMauve: "#cba6f7"
+    readonly property color colTeal: "#94e2d5"
+    readonly property color colGreen: "#a6e3a1"
+    readonly property color colPeach: "#fab387"
+    readonly property color colRed: "#f38ba8"
+    readonly property color colDark: "#1e1e2e"
+    readonly property string uiFont: "JetBrainsMono Nerd Font"
+
+    readonly property var calendarHeaders: ["Mo", "Tu", "We", "Th", "Fr", "Sa", "Su"]
+    readonly property var calendarDays: [
+        { d: "2", cls: "" }, { d: "3", cls: "" }, { d: "4", cls: "" }, { d: "5", cls: "" }, { d: "6", cls: "" }, { d: "7", cls: "wknd" }, { d: "8", cls: "wknd" },
+        { d: "9", cls: "" }, { d: "10", cls: "" }, { d: "11", cls: "" }, { d: "12", cls: "" }, { d: "13", cls: "" }, { d: "14", cls: "wknd" }, { d: "15", cls: "wknd" },
+        { d: "16", cls: "" }, { d: "17", cls: "today" }, { d: "18", cls: "" }, { d: "19", cls: "" }, { d: "20", cls: "" }, { d: "21", cls: "wknd" }, { d: "22", cls: "wknd" },
+        { d: "23", cls: "" }, { d: "24", cls: "" }, { d: "25", cls: "" }, { d: "26", cls: "" }, { d: "27", cls: "" }, { d: "28", cls: "wknd" }, { d: "29", cls: "wknd" },
+        { d: "30", cls: "" }, { d: "1", cls: "muted" }, { d: "2", cls: "muted" }, { d: "3", cls: "muted" }, { d: "4", cls: "muted" }, { d: "5", cls: "muted" }, { d: "6", cls: "muted" }
+    ]
+
+    function runCmd(cmd) {
+        Quickshell.execDetached(cmd);
+    }
+
+    function refreshAudio() {
+        if (!audioPollProc.running) {
+            audioPollProc.running = true;
+        }
+    }
+
+    function toggleWidgets() {
+        if (root.widgetsOpen) {
+            closeWidgets();
+        } else {
+            closeSession();
+            widgetsCloseTimer.stop();
+            root.widgetsActive = true;
+            root.widgetsOpen = true;
+            syncWatcher();
+        }
+    }
+
+    function closeWidgets() {
+        if (!root.widgetsOpen && !root.widgetsActive) return;
+        root.widgetsOpen = false;
+        widgetsCloseTimer.restart();
+        syncWatcher();
+    }
+
+    function toggleSession() {
+        if (root.sessionOpen) {
+            closeSession();
+        } else {
+            closeWidgets();
+            sessionCloseTimer.stop();
+            root.sessionActive = true;
+            root.sessionOpen = true;
+            syncWatcher();
+        }
+    }
+
+    function closeSession() {
+        if (!root.sessionOpen && !root.sessionActive) return;
+        root.sessionOpen = false;
+        sessionCloseTimer.restart();
+        syncWatcher();
+    }
+
+    function closeAllMenus() {
+        closeWidgets();
+        closeSession();
+    }
+
+    function syncWatcher() {
+        submenuWatcher.running = false;
+        if (root.widgetsOpen || root.sessionOpen) {
+            watcherRestartTimer.restart();
+        } else {
+            watcherRestartTimer.stop();
+        }
+    }
+
+    function parseReport(line) {
+        const parts = line.trim().split(":");
+        if (parts.length < 2) return;
+        const next = [];
+        for (let i = 0; i < parts.length; i++) {
+            const p = parts[i];
+            if (!p || p.length < 2) continue;
+            const tag = p[0];
+            const name = p.slice(1);
+            if ("FfOoUu".indexOf(tag) >= 0) {
+                const n = parseInt(name, 10);
+                if (!isNaN(n)) {
+                    next.push({
+                        num: n,
+                        focused: ("FOU".indexOf(tag) >= 0),
+                        occupied: ("Oo".indexOf(tag) >= 0),
+                        urgent: ("Uu".indexOf(tag) >= 0)
+                    });
+                }
+            } else if (tag === "L") {
+                root.layoutMode = name;
+            }
+        }
+        if (next.length > 0) {
+            root.desktopStates = next;
+        }
+    }
+
+    Timer {
+        id: widgetsCloseTimer
+        interval: 190
+        repeat: false
+        onTriggered: {
+            if (!root.widgetsOpen) root.widgetsActive = false;
+        }
+    }
+
+    Timer {
+        id: sessionCloseTimer
+        interval: 170
+        repeat: false
+        onTriggered: {
+            if (!root.sessionOpen) root.sessionActive = false;
+        }
+    }
+
+    Timer {
+        id: watcherRestartTimer
+        interval: 30
+        repeat: false
+        onTriggered: {
+            if (root.widgetsOpen || root.sessionOpen) {
+                submenuWatcher.running = true;
+            }
+        }
+    }
+
+    Process {
+        id: submenuWatcher
+        command: [
+            "python3",
+            Quickshell.env("HOME") + "/.config/quickshell/scripts/submenu_watch.py",
+            String(dockWindow.width),
+            String(dockWindow.height > 0 ? dockWindow.height : 1508),
+            String(dockWindow.width + 12),
+            String(root.widgetsOpen ? 80 : Math.max(80, 80 + (dockWindow.height > 0 ? dockWindow.height : 1508) - 368)),
+            String(root.widgetsOpen ? widgetsPopup.implicitWidth : sessionPopup.implicitWidth),
+            String(root.widgetsOpen ? widgetsPopup.implicitHeight : sessionPopup.implicitHeight)
+        ]
+        stdout: SplitParser {
+            onRead: data => {
+                if (data.trim() === "CLOSE") {
+                    root.closeAllMenus();
+                }
+            }
+        }
+    }
+
+    Process {
+        id: bspwmSub
+        command: ["bspc", "subscribe", "report"]
+        running: true
+        stdout: SplitParser {
+            onRead: data => root.parseReport(data)
+        }
+    }
+
+    Process {
+        id: audioPollProc
+        command: ["sh", "-c", "pactl get-sink-volume @DEFAULT_SINK@ 2>/dev/null; echo ---; pactl get-sink-mute @DEFAULT_SINK@ 2>/dev/null"]
+        running: true
+        stdout: StdioCollector {
+            onStreamFinished: {
+                const sections = this.text.split("---");
+                if (sections.length >= 1) {
+                    const m = sections[0].match(/([0-9]+)%/);
+                    if (m) root.volumePct = parseInt(m[1], 10);
+                }
+                if (sections.length >= 2) {
+                    root.muted = (sections[1].indexOf("yes") >= 0);
+                }
+            }
+        }
+    }
+
+    Timer {
+        interval: 4000
+        running: true
+        repeat: true
+        onTriggered: root.refreshAudio()
+    }
+
+    Timer {
+        id: audioSyncDelay
+        interval: 150
+        repeat: false
+        onTriggered: root.refreshAudio()
+    }
+
+    component DockButton: Rectangle {
+        id: btn
+        property string iconText: ""
+        property string subText: ""
+        property color iconColor: root.colText
+        property color baseColor: root.colSurface
+        property color activeColor: root.colSurface1
+        property bool active: false
+        property int iconSize: 28
+        property int buttonHeight: 60
+        signal clicked()
+
+        implicitWidth: 92
+        implicitHeight: btn.buttonHeight
+        radius: 18
+        color: area.pressed ? root.colBlue : (btn.active ? btn.activeColor : btn.baseColor)
+        scale: area.pressed ? 0.92 : 1.0
+
+        Behavior on scale { NumberAnimation { duration: 80 } }
+        Behavior on color { ColorAnimation { duration: 100 } }
+
+        Column {
+            anchors.centerIn: parent
+            spacing: 1
+            Text {
+                anchors.horizontalCenter: parent.horizontalCenter
+                text: btn.iconText
+                color: area.pressed ? root.colDark : btn.iconColor
+                font.family: root.uiFont
+                font.pixelSize: btn.iconSize
+                lineHeight: 1.0
+            }
+            Text {
+                visible: btn.subText.length > 0
+                anchors.horizontalCenter: parent.horizontalCenter
+                text: btn.subText
+                color: area.pressed ? root.colDark : root.colSubtext
+                font.family: root.uiFont
+                font.pixelSize: 13
+                font.bold: true
+            }
+        }
+
+        MouseArea {
+            id: area
+            anchors.fill: parent
+            anchors.leftMargin: -16
+            anchors.rightMargin: -12
+            anchors.topMargin: -4
+            anchors.bottomMargin: -4
+            onClicked: btn.clicked()
+        }
+    }
+
+    PanelWindow {
+        id: dockWindow
+        anchors {
+            left: true
+            top: true
+            bottom: true
+        }
+        margins {
+            left: 0
+            top: 80
+            bottom: 12
+        }
+        implicitWidth: 128
+        color: "transparent"
+
+        readonly property bool compactDock: height > 0 && height < 1200
+
+        Rectangle {
+            id: barBg
+            anchors.fill: parent
+            anchors.leftMargin: 12
+            radius: 24
+            color: root.colBase
+            border.color: root.colSurface
+            border.width: 2
+
+            ColumnLayout {
+                anchors.fill: parent
+                anchors.topMargin: dockWindow.compactDock ? 8 : 14
+                anchors.bottomMargin: dockWindow.compactDock ? 8 : 14
+                spacing: dockWindow.compactDock ? 4 : 8
+
+                // Top: Touch Launchers
+                Column {
+                    Layout.alignment: Qt.AlignHCenter
+                    spacing: dockWindow.compactDock ? 6 : 12
+
+                    DockButton {
+                        iconText: "\U000f003b"
+                        iconColor: root.colBlue
+                        iconSize: dockWindow.compactDock ? 26 : 34
+                        buttonHeight: dockWindow.compactDock ? 44 : 66
+                        onClicked: {
+                            root.closeAllMenus();
+                            root.runCmd(["rofi", "-show", "drun"]);
+                        }
+                    }
+                    DockButton {
+                        iconText: "\uf120"
+                        iconColor: root.colTeal
+                        iconSize: dockWindow.compactDock ? 24 : 30
+                        buttonHeight: dockWindow.compactDock ? 44 : 66
+                        onClicked: {
+                            root.closeAllMenus();
+                            root.runCmd(["sh", "-c", "if command -v xfce4-terminal >/dev/null 2>&1; then exec xfce4-terminal; else exec alacritty; fi"]);
+                        }
+                    }
+                    DockButton {
+                        iconText: "\uf2d2"
+                        iconColor: root.colMauve
+                        iconSize: dockWindow.compactDock ? 24 : 30
+                        buttonHeight: dockWindow.compactDock ? 44 : 66
+                        onClicked: {
+                            root.closeAllMenus();
+                            root.runCmd(["rofi", "-show", "window"]);
+                        }
+                    }
+                }
+
+                Rectangle {
+                    Layout.alignment: Qt.AlignHCenter
+                    width: 60
+                    height: 2
+                    radius: 1
+                    color: root.colSurface1
+                }
+
+                // Middle: Touch Workspaces (1-6) + Layout Toggle
+                Column {
+                    Layout.alignment: Qt.AlignHCenter
+                    spacing: dockWindow.compactDock ? 5 : 12
+
+                    Repeater {
+                        model: root.desktopStates
+                        delegate: Rectangle {
+                            required property var modelData
+                            width: 92
+                            height: dockWindow.compactDock ? 36 : 58
+                            radius: 18
+                            scale: wsArea.pressed ? 0.92 : 1.0
+                            color: modelData.focused
+                                ? root.colBlue
+                                : (modelData.urgent
+                                    ? root.colRed
+                                    : (modelData.occupied ? root.colSurface : "transparent"))
+                            border.color: (!modelData.focused && modelData.occupied) ? root.colSurface1 : "transparent"
+                            border.width: 1
+
+                            Behavior on scale { NumberAnimation { duration: 80 } }
+                            Behavior on color { ColorAnimation { duration: 100 } }
+
+                            Row {
+                                anchors.centerIn: parent
+                                spacing: 6
+                                Text {
+                                    text: String(modelData.num)
+                                    color: (modelData.focused || modelData.urgent) ? root.colDark : (modelData.occupied ? root.colText : root.colSubtext)
+                                    font.family: root.uiFont
+                                    font.pixelSize: dockWindow.compactDock ? 18 : 24
+                                    font.bold: modelData.focused || modelData.occupied
+                                }
+                                Rectangle {
+                                    visible: modelData.occupied && !modelData.focused
+                                    anchors.verticalCenter: parent.verticalCenter
+                                    width: 8
+                                    height: 8
+                                    radius: 4
+                                    color: root.colBlue
+                                }
+                            }
+
+                            MouseArea {
+                                id: wsArea
+                                anchors.fill: parent
+                                anchors.leftMargin: -16
+                                anchors.rightMargin: -12
+                                anchors.topMargin: -4
+                                anchors.bottomMargin: -4
+                                onClicked: root.runCmd(["bspc", "desktop", "-f", "^" + modelData.num])
+                            }
+                        }
+                    }
+
+                    DockButton {
+                        buttonHeight: dockWindow.compactDock ? 42 : 56
+                        iconText: root.layoutMode === "M" ? "\U000f056e" : "\U000f0573"
+                        subText: dockWindow.compactDock ? "" : root.layoutMode
+                        iconColor: root.layoutMode === "M" ? root.colMauve : root.colSubtext
+                        iconSize: dockWindow.compactDock ? 20 : 24
+                        onClicked: root.runCmd(["bspc", "desktop", "-l", "next"])
+                    }
+                }
+
+                // Empty Dock Spacer -> Click to Toggle Widget Drawer
+                Item {
+                    Layout.fillWidth: true
+                    Layout.fillHeight: true
+                    Layout.minimumHeight: dockWindow.compactDock ? 32 : 60
+
+                    Column {
+                        anchors.centerIn: parent
+                        spacing: 6
+                        Text {
+                            anchors.horizontalCenter: parent.horizontalCenter
+                            text: root.widgetsOpen ? "\U000f0141" : "\U000f0142"
+                            color: root.widgetsOpen ? root.colBlue : root.colSubtext
+                            font.family: root.uiFont
+                            font.pixelSize: 22
+                        }
+                        Rectangle {
+                            anchors.horizontalCenter: parent.horizontalCenter
+                            width: 6
+                            height: dockWindow.compactDock ? 20 : 44
+                            radius: 3
+                            color: root.widgetsOpen ? root.colBlue : root.colSurface1
+                            Behavior on color { ColorAnimation { duration: 120 } }
+                        }
+                    }
+
+                    MouseArea {
+                        id: drawerToggleArea
+                        anchors.fill: parent
+                        onClicked: root.toggleWidgets()
+                    }
+                }
+
+                Rectangle {
+                    Layout.alignment: Qt.AlignHCenter
+                    width: 60
+                    height: 2
+                    radius: 1
+                    color: root.colSurface1
+                }
+
+                // Bottom: Window Controls + Volume + Session Power
+                Column {
+                    Layout.alignment: Qt.AlignHCenter
+                    spacing: dockWindow.compactDock ? 5 : 10
+
+                    DockButton {
+                        buttonHeight: dockWindow.compactDock ? 36 : 56
+                        iconText: "\uf2d0"
+                        iconColor: root.colText
+                        iconSize: dockWindow.compactDock ? 20 : 26
+                        onClicked: root.runCmd(["bspc", "node", "-t", "~floating"])
+                    }
+                    DockButton {
+                        buttonHeight: dockWindow.compactDock ? 36 : 56
+                        iconText: "\uf065"
+                        iconColor: root.colText
+                        iconSize: dockWindow.compactDock ? 20 : 26
+                        onClicked: root.runCmd(["bspc", "node", "-t", "~fullscreen"])
+                    }
+                    DockButton {
+                        buttonHeight: dockWindow.compactDock ? 36 : 56
+                        iconText: "\uf00d"
+                        iconColor: root.colRed
+                        iconSize: dockWindow.compactDock ? 22 : 28
+                        onClicked: root.runCmd(["bspc", "node", "-c"])
+                    }
+
+                    Rectangle {
+                        anchors.horizontalCenter: parent.horizontalCenter
+                        width: 60
+                        height: 2
+                        radius: 1
+                        color: root.colSurface1
+                    }
+
+                    DockButton {
+                        buttonHeight: dockWindow.compactDock ? 34 : 50
+                        iconText: "\U000f0415"
+                        iconColor: root.colText
+                        iconSize: dockWindow.compactDock ? 20 : 26
+                        onClicked: {
+                            root.runCmd(["pactl", "set-sink-volume", "@DEFAULT_SINK@", "+5%"]);
+                            audioSyncDelay.restart();
+                        }
+                    }
+                    DockButton {
+                        buttonHeight: dockWindow.compactDock ? 46 : 66
+                        iconText: root.muted ? "\U000f075f" : "\U000f057e"
+                        subText: root.muted ? "MUTE" : (root.volumePct + "%")
+                        iconColor: root.muted ? root.colRed : root.colGreen
+                        iconSize: dockWindow.compactDock ? 20 : 24
+                        onClicked: {
+                            root.runCmd(["pactl", "set-sink-mute", "@DEFAULT_SINK@", "toggle"]);
+                            audioSyncDelay.restart();
+                        }
+                    }
+                    DockButton {
+                        buttonHeight: dockWindow.compactDock ? 34 : 50
+                        iconText: "\U000f0374"
+                        iconColor: root.colText
+                        iconSize: dockWindow.compactDock ? 20 : 26
+                        onClicked: {
+                            root.runCmd(["pactl", "set-sink-volume", "@DEFAULT_SINK@", "-5%"]);
+                            audioSyncDelay.restart();
+                        }
+                    }
+
+                    DockButton {
+                        id: sessionBtn
+                        buttonHeight: dockWindow.compactDock ? 42 : 62
+                        iconText: "\uf011"
+                        iconColor: root.sessionOpen ? root.colDark : root.colRed
+                        baseColor: root.sessionOpen ? root.colRed : root.colSurface
+                        iconSize: dockWindow.compactDock ? 22 : 28
+                        onClicked: root.toggleSession()
+                    }
+                }
+            }
+        }
+    }
+
+    // Large Readable Widget Drawer (1/3 screen width, full dock height)
+    PopupWindow {
+        id: widgetsPopup
+        anchor.window: dockWindow
+        anchor.rect.x: dockWindow.width + 12
+        anchor.rect.y: 0
+        implicitWidth: 844
+        implicitHeight: dockWindow.height > 0 ? dockWindow.height : 1504
+        visible: root.widgetsActive
+        color: "transparent"
+
+        Item {
+            anchors.fill: parent
+            clip: true
+
+            Rectangle {
+                id: drawerBg
+                width: parent.width
+                height: parent.height
+                x: root.widgetsOpen ? 0 : -44
+                opacity: root.widgetsOpen ? 1.0 : 0.0
+                radius: 24
+                color: root.colPopupBase
+                border.color: root.colSurface1
+                border.width: 2
+
+                Behavior on x { NumberAnimation { duration: 180; easing.type: Easing.OutCubic } }
+                Behavior on opacity { NumberAnimation { duration: 140 } }
+
+                Flickable {
+                    anchors.fill: parent
+                    anchors.margins: 28
+                    contentWidth: width
+                    contentHeight: drawerCol.implicitHeight
+                    clip: true
+                    boundsBehavior: Flickable.StopAtBounds
+                    interactive: contentHeight > height
+
+                    ColumnLayout {
+                        id: drawerCol
+                        width: parent.width
+                        spacing: 20
+
+                        // Header
+                        RowLayout {
+                            Layout.fillWidth: true
+                            Row {
+                                spacing: 14
+                                Layout.fillWidth: true
+                                Text {
+                                    anchors.verticalCenter: parent.verticalCenter
+                                    text: "\U000f003b"
+                                    color: root.colBlue
+                                    font.family: root.uiFont
+                                    font.pixelSize: 34
+                                }
+                                Text {
+                                    anchors.verticalCenter: parent.verticalCenter
+                                    text: "Widgets"
+                                    color: root.colText
+                                    font.family: root.uiFont
+                                    font.pixelSize: 30
+                                    font.bold: true
+                                }
+                            }
+                            Rectangle {
+                                width: 48
+                                height: 48
+                                radius: 16
+                                color: closeBtnArea.pressed ? root.colBlue : root.colSurface
+                                border.color: root.colSurface1
+                                border.width: 1
+                                Text {
+                                    anchors.centerIn: parent
+                                    text: "\uf00d"
+                                    color: closeBtnArea.pressed ? root.colDark : root.colSubtext
+                                    font.family: root.uiFont
+                                    font.pixelSize: 22
+                                }
+                                MouseArea {
+                                    id: closeBtnArea
+                                    anchors.fill: parent
+                                    onClicked: root.closeWidgets()
+                                }
+                            }
+                        }
+
+                        // Quick Widget Spaces Row
+                        RowLayout {
+                            Layout.fillWidth: true
+                            spacing: 18
+
+                            Rectangle {
+                                Layout.fillWidth: true
+                                implicitHeight: weatherCol.implicitHeight + 40
+                                radius: 20
+                                color: root.colSurface
+                                border.color: root.colSurface1
+                                border.width: 1
+
+                                Column {
+                                    id: weatherCol
+                                    anchors.fill: parent
+                                    anchors.margins: 20
+                                    spacing: 8
+                                    Row {
+                                        spacing: 12
+                                        Text {
+                                            anchors.verticalCenter: parent.verticalCenter
+                                            text: "\U000f0599"
+                                            color: root.colPeach
+                                            font.family: root.uiFont
+                                            font.pixelSize: 38
+                                        }
+                                        Text {
+                                            anchors.verticalCenter: parent.verticalCenter
+                                            text: "22°C"
+                                            color: root.colText
+                                            font.family: root.uiFont
+                                            font.pixelSize: 32
+                                            font.bold: true
+                                        }
+                                    }
+                                    Text {
+                                        text: "Clear Sky · Feels 21°C"
+                                        color: root.colSubtext
+                                        font.family: root.uiFont
+                                        font.pixelSize: 21
+                                    }
+                                }
+                            }
+
+                            Rectangle {
+                                Layout.fillWidth: true
+                                implicitHeight: focusCol.implicitHeight + 40
+                                radius: 20
+                                color: root.colSurface
+                                border.color: root.colSurface1
+                                border.width: 1
+
+                                Column {
+                                    id: focusCol
+                                    anchors.fill: parent
+                                    anchors.margins: 20
+                                    spacing: 8
+                                    Row {
+                                        spacing: 12
+                                        Text {
+                                            anchors.verticalCenter: parent.verticalCenter
+                                            text: "\U000f05a9"
+                                            color: root.colTeal
+                                            font.family: root.uiFont
+                                            font.pixelSize: 38
+                                        }
+                                        Text {
+                                            anchors.verticalCenter: parent.verticalCenter
+                                            text: "Termux"
+                                            color: root.colText
+                                            font.family: root.uiFont
+                                            font.pixelSize: 32
+                                            font.bold: true
+                                        }
+                                    }
+                                    Text {
+                                        text: "Do Not Disturb · On"
+                                        color: root.colSubtext
+                                        font.family: root.uiFont
+                                        font.pixelSize: 21
+                                    }
+                                }
+                            }
+                        }
+
+                        // Spotify Card Space (Mockup)
+                        Rectangle {
+                            Layout.fillWidth: true
+                            implicitHeight: spotifyCol.implicitHeight + 44
+                            radius: 20
+                            color: root.colSurface
+                            border.color: root.colSurface1
+                            border.width: 1
+
+                            Column {
+                                id: spotifyCol
+                                anchors.fill: parent
+                                anchors.leftMargin: 24
+                                anchors.rightMargin: 24
+                                anchors.topMargin: 22
+                                anchors.bottomMargin: 22
+                                spacing: 18
+
+                                Row {
+                                    width: parent.width
+                                    spacing: 20
+                                    Rectangle {
+                                        width: 112
+                                        height: 112
+                                        radius: 18
+                                        color: root.colSurface1
+                                        Text {
+                                            anchors.centerIn: parent
+                                            text: "\U000f04c7"
+                                            color: root.colGreen
+                                            font.family: root.uiFont
+                                            font.pixelSize: 54
+                                        }
+                                    }
+                                    Column {
+                                        anchors.verticalCenter: parent.verticalCenter
+                                        spacing: 6
+                                        Text {
+                                            text: "NOW PLAYING"
+                                            color: root.colGreen
+                                            font.family: root.uiFont
+                                            font.pixelSize: 16
+                                            font.bold: true
+                                        }
+                                        Text {
+                                            text: "Midnight City"
+                                            color: root.colText
+                                            font.family: root.uiFont
+                                            font.pixelSize: 27
+                                            font.bold: true
+                                        }
+                                        Text {
+                                            text: "M83 · Hurry Up, We're Dreaming"
+                                            color: root.colSubtext
+                                            font.family: root.uiFont
+                                            font.pixelSize: 22
+                                        }
+                                    }
+                                }
+
+                                Column {
+                                    width: parent.width
+                                    spacing: 8
+                                    Rectangle {
+                                        width: parent.width
+                                        height: 10
+                                        radius: 5
+                                        color: root.colSurface1
+                                        Rectangle {
+                                            width: parent.width * 0.46
+                                            height: parent.height
+                                            radius: 5
+                                            color: root.colGreen
+                                        }
+                                    }
+                                    RowLayout {
+                                        width: parent.width
+                                        Text {
+                                            text: "1:42"
+                                            color: root.colSubtext
+                                            font.family: root.uiFont
+                                            font.pixelSize: 19
+                                            font.bold: true
+                                        }
+                                        Item { Layout.fillWidth: true }
+                                        Text {
+                                            text: "3:55"
+                                            color: root.colSubtext
+                                            font.family: root.uiFont
+                                            font.pixelSize: 19
+                                            font.bold: true
+                                        }
+                                    }
+                                }
+
+                                Row {
+                                    anchors.horizontalCenter: parent.horizontalCenter
+                                    spacing: 40
+                                    Text {
+                                        anchors.verticalCenter: parent.verticalCenter
+                                        text: "\U000f04ae"
+                                        color: root.colSubtext
+                                        font.family: root.uiFont
+                                        font.pixelSize: 32
+                                    }
+                                    Rectangle {
+                                        width: 62
+                                        height: 62
+                                        radius: 31
+                                        color: root.colGreen
+                                        Text {
+                                            anchors.centerIn: parent
+                                            text: "\U000f03e4"
+                                            color: root.colDark
+                                            font.family: root.uiFont
+                                            font.pixelSize: 30
+                                        }
+                                    }
+                                    Text {
+                                        anchors.verticalCenter: parent.verticalCenter
+                                        text: "\U000f04ad"
+                                        color: root.colSubtext
+                                        font.family: root.uiFont
+                                        font.pixelSize: 32
+                                    }
+                                }
+                            }
+                        }
+
+                        // Calendar Space (Mockup)
+                        Rectangle {
+                            Layout.fillWidth: true
+                            implicitHeight: calCol.implicitHeight + 44
+                            radius: 20
+                            color: root.colSurface
+                            border.color: root.colSurface1
+                            border.width: 1
+
+                            Column {
+                                id: calCol
+                                anchors.fill: parent
+                                anchors.leftMargin: 24
+                                anchors.rightMargin: 24
+                                anchors.topMargin: 22
+                                anchors.bottomMargin: 22
+                                spacing: 14
+
+                                RowLayout {
+                                    width: parent.width
+                                    Row {
+                                        spacing: 12
+                                        Text {
+                                            anchors.verticalCenter: parent.verticalCenter
+                                            text: "\U000f00ed"
+                                            color: root.colBlue
+                                            font.family: root.uiFont
+                                            font.pixelSize: 28
+                                        }
+                                        Text {
+                                            anchors.verticalCenter: parent.verticalCenter
+                                            text: "November 2026"
+                                            color: root.colText
+                                            font.family: root.uiFont
+                                            font.pixelSize: 24
+                                            font.bold: true
+                                        }
+                                    }
+                                    Item { Layout.fillWidth: true }
+                                    Text {
+                                        text: "\U000f0141   \U000f0142"
+                                        color: root.colSubtext
+                                        font.family: root.uiFont
+                                        font.pixelSize: 24
+                                    }
+                                }
+
+                                GridLayout {
+                                    width: parent.width
+                                    columns: 7
+                                    columnSpacing: 6
+                                    rowSpacing: 8
+
+                                    Repeater {
+                                        model: root.calendarHeaders
+                                        delegate: Item {
+                                            required property string modelData
+                                            Layout.fillWidth: true
+                                            implicitHeight: 42
+                                            Text {
+                                                anchors.centerIn: parent
+                                                text: modelData
+                                                color: root.colSubtext
+                                                font.family: root.uiFont
+                                                font.pixelSize: 21
+                                                font.bold: true
+                                            }
+                                        }
+                                    }
+
+                                    Repeater {
+                                        model: root.calendarDays
+                                        delegate: Rectangle {
+                                            required property var modelData
+                                            Layout.fillWidth: true
+                                            implicitHeight: 46
+                                            radius: 14
+                                            color: modelData.cls === "today" ? root.colBlue : "transparent"
+                                            Text {
+                                                anchors.centerIn: parent
+                                                text: modelData.d
+                                                color: modelData.cls === "today"
+                                                    ? root.colDark
+                                                    : (modelData.cls === "muted"
+                                                        ? root.colSurface1
+                                                        : (modelData.cls === "wknd" ? root.colSubtext : root.colText))
+                                                font.family: root.uiFont
+                                                font.pixelSize: 23
+                                                font.bold: modelData.cls === "today"
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        // Agenda / Notes Space (Mockup)
+                        Rectangle {
+                            Layout.fillWidth: true
+                            Layout.fillHeight: true
+                            implicitHeight: agendaCol.implicitHeight + 44
+                            radius: 20
+                            color: root.colSurface
+                            border.color: root.colSurface1
+                            border.width: 1
+
+                            Column {
+                                id: agendaCol
+                                anchors.fill: parent
+                                anchors.leftMargin: 24
+                                anchors.rightMargin: 24
+                                anchors.topMargin: 22
+                                anchors.bottomMargin: 22
+                                spacing: 14
+
+                                Row {
+                                    spacing: 12
+                                    Text {
+                                        anchors.verticalCenter: parent.verticalCenter
+                                        text: "\U000f039a"
+                                        color: root.colMauve
+                                        font.family: root.uiFont
+                                        font.pixelSize: 28
+                                    }
+                                    Text {
+                                        anchors.verticalCenter: parent.verticalCenter
+                                        text: "Agenda"
+                                        color: root.colText
+                                        font.family: root.uiFont
+                                        font.pixelSize: 24
+                                        font.bold: true
+                                    }
+                                }
+
+                                Repeater {
+                                    model: [
+                                        { t: "19:00", col: root.colBlue, txt: "Build Termux X11 Dock" },
+                                        { t: "21:30", col: root.colMauve, txt: "Sync Dotfiles & GUI Rules" },
+                                        { t: "22:45", col: root.colTeal, txt: "Wrap Up Workspace Widgets" }
+                                    ]
+                                    delegate: Rectangle {
+                                        required property var modelData
+                                        width: parent.width
+                                        height: 54
+                                        radius: 14
+                                        color: root.colPopupBase
+                                        border.color: root.colSurface1
+                                        border.width: 1
+                                        Row {
+                                            anchors.verticalCenter: parent.verticalCenter
+                                            anchors.left: parent.left
+                                            anchors.leftMargin: 16
+                                            spacing: 16
+                                            Text {
+                                                anchors.verticalCenter: parent.verticalCenter
+                                                text: modelData.t
+                                                color: modelData.col
+                                                font.family: root.uiFont
+                                                font.pixelSize: 21
+                                                font.bold: true
+                                            }
+                                            Text {
+                                                anchors.verticalCenter: parent.verticalCenter
+                                                text: modelData.txt
+                                                color: root.colText
+                                                font.family: root.uiFont
+                                                font.pixelSize: 21
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // Raised Session Menu (Bottom-left submenu of Quit/Power button)
+    PopupWindow {
+        id: sessionPopup
+        anchor.window: dockWindow
+        anchor.rect.x: dockWindow.width + 12
+        anchor.rect.y: Math.max(0, (dockWindow.height > 0 ? dockWindow.height : 1504) - 368)
+        implicitWidth: 330
+        implicitHeight: 368
+        visible: root.sessionActive
+        color: "transparent"
+
+        Item {
+            anchors.fill: parent
+            clip: true
+
+            Rectangle {
+                width: parent.width
+                height: 330
+                y: root.sessionOpen ? 0 : 28
+                opacity: root.sessionOpen ? 1.0 : 0.0
+                radius: 22
+                color: root.colPopupBase
+                border.color: root.colSurface1
+                border.width: 2
+
+                Behavior on y { NumberAnimation { duration: 160; easing.type: Easing.OutCubic } }
+                Behavior on opacity { NumberAnimation { duration: 130 } }
+
+                Column {
+                    anchors.fill: parent
+                    anchors.margins: 18
+                    spacing: 18
+
+                    Repeater {
+                        model: [
+                            { label: "Reload Bars", icon: "\uf021", color: root.colBlue, cmd: ["sh", "-c", "$HOME/.config/polybar/launch.sh & $HOME/.config/quickshell/launch.sh &"] },
+                            { label: "Restart WM", icon: "\uf021", color: root.colTeal, cmd: ["bspc", "wm", "-r"] },
+                            { label: "Exit X11", icon: "\uf011", color: root.colRed, cmd: ["bspc", "quit"] }
+                        ]
+                        delegate: Rectangle {
+                            required property var modelData
+                            width: parent.width
+                            height: 86
+                            radius: 16
+                            color: popArea.pressed ? root.colBlue : root.colSurface
+                            Row {
+                                anchors.verticalCenter: parent.verticalCenter
+                                anchors.left: parent.left
+                                anchors.leftMargin: 20
+                                spacing: 16
+                                Text {
+                                    anchors.verticalCenter: parent.verticalCenter
+                                    text: modelData.icon
+                                    color: popArea.pressed ? root.colDark : modelData.color
+                                    font.family: root.uiFont
+                                    font.pixelSize: 26
+                                }
+                                Text {
+                                    anchors.verticalCenter: parent.verticalCenter
+                                    text: modelData.label
+                                    color: popArea.pressed ? root.colDark : root.colText
+                                    font.family: root.uiFont
+                                    font.pixelSize: 21
+                                    font.bold: true
+                                }
+                            }
+                            MouseArea {
+                                id: popArea
+                                anchors.fill: parent
+                                anchors.leftMargin: -18
+                                anchors.rightMargin: -18
+                                anchors.topMargin: -9
+                                anchors.bottomMargin: -9
+                                onClicked: {
+                                    root.closeSession();
+                                    root.runCmd(modelData.cmd);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+"""
+
+QUICKSHELL_WAYLAND_QML = """import Quickshell
+import Quickshell.Io
+import Quickshell.Wayland
+import QtQuick
+import QtQuick.Layouts
+
+ShellRoot {
+    id: root
+
+    readonly property bool isSway: (Quickshell.env("SWAYSOCK") || "").length > 0
+    property var desktopStates: [
+        { num: 1, focused: true, occupied: false, urgent: false },
+        { num: 2, focused: false, occupied: false, urgent: false },
+        { num: 3, focused: false, occupied: false, urgent: false },
+        { num: 4, focused: false, occupied: false, urgent: false },
+        { num: 5, focused: false, occupied: false, urgent: false },
+        { num: 6, focused: false, occupied: false, urgent: false }
+    ]
+    property int volumePct: 50
+    property bool muted: false
+    property int cpuPct: 0
+    property string memUsed: "0.0"
+    property string memTotal: "0.0"
+    property int memPct: 0
+    property int batPct: -1
+    property string batStatus: "UNKNOWN"
+    property real tempC: -1
+    property string batWatts: ""
+    property bool wifiOk: false
+    property int wifiRate: 0
+    property string focusedTitle: {
+        if (root.isSway) return swayFocusedTitle;
+        const tl = ToplevelManager.activeToplevel;
+        return (tl && tl.title && tl.title.length > 0) ? String(tl.title) : "Ready";
+    }
+    property string swayFocusedTitle: "Ready"
+    property string clockText: Qt.formatDateTime(new Date(), "ddd d MMM  HH:mm")
+
+    property bool sessionOpen: false
+    property bool sessionActive: false
+    property bool widgetsOpen: false
+    property bool widgetsActive: false
+
+    readonly property color colBase: "#e61e1e2e"
+    readonly property color colPopupBase: "#f21e1e2e"
+    readonly property color colSurface: "#313244"
+    readonly property color colSurface1: "#45475a"
+    readonly property color colText: "#cdd6f4"
+    readonly property color colSubtext: "#a6adc8"
+    readonly property color colBlue: "#89b4fa"
+    readonly property color colMauve: "#cba6f7"
+    readonly property color colTeal: "#94e2d5"
+    readonly property color colGreen: "#a6e3a1"
+    readonly property color colPeach: "#fab387"
+    readonly property color colRed: "#f38ba8"
+    readonly property color colDark: "#1e1e2e"
+    readonly property string uiFont: "JetBrainsMono Nerd Font"
+
+    readonly property var calendarHeaders: ["Mo", "Tu", "We", "Th", "Fr", "Sa", "Su"]
+    readonly property var calendarDays: [
+        { d: "2", cls: "" }, { d: "3", cls: "" }, { d: "4", cls: "" }, { d: "5", cls: "" }, { d: "6", cls: "" }, { d: "7", cls: "wknd" }, { d: "8", cls: "wknd" },
+        { d: "9", cls: "" }, { d: "10", cls: "" }, { d: "11", cls: "" }, { d: "12", cls: "" }, { d: "13", cls: "" }, { d: "14", cls: "wknd" }, { d: "15", cls: "wknd" },
+        { d: "16", cls: "" }, { d: "17", cls: "today" }, { d: "18", cls: "" }, { d: "19", cls: "" }, { d: "20", cls: "" }, { d: "21", cls: "wknd" }, { d: "22", cls: "wknd" },
+        { d: "23", cls: "" }, { d: "24", cls: "" }, { d: "25", cls: "" }, { d: "26", cls: "" }, { d: "27", cls: "" }, { d: "28", cls: "wknd" }, { d: "29", cls: "wknd" },
+        { d: "30", cls: "" }, { d: "1", cls: "muted" }, { d: "2", cls: "muted" }, { d: "3", cls: "muted" }, { d: "4", cls: "muted" }, { d: "5", cls: "muted" }, { d: "6", cls: "muted" }
+    ]
+
+    function runCmd(cmd) {
+        Quickshell.execDetached(cmd);
+    }
+
+    function refreshAudio() {
+        if (!audioPollProc.running) {
+            audioPollProc.running = true;
+        }
+    }
+
+    function refreshSwayWorkspaces() {
+        if (root.isSway && !swayWsPoll.running) {
+            swayWsPoll.running = true;
+        }
+        if (root.isSway && !swayTreePoll.running) {
+            swayTreePoll.running = true;
+        }
+    }
+
+    function findFocusedTitle(node) {
+        if (!node) return "";
+        if (node.focused && node.name && node.type !== "workspace" && node.type !== "output" && node.type !== "root") {
+            return String(node.name);
+        }
+        const kids = (node.nodes || []).concat(node.floating_nodes || []);
+        for (let i = 0; i < kids.length; i++) {
+            const t = findFocusedTitle(kids[i]);
+            if (t.length > 0) return t;
+        }
+        return "";
+    }
+
+    function toggleWidgets() {
+        if (root.widgetsOpen) {
+            closeWidgets();
+        } else {
+            closeSession();
+            widgetsCloseTimer.stop();
+            root.widgetsActive = true;
+            root.widgetsOpen = true;
+        }
+    }
+
+    function closeWidgets() {
+        if (!root.widgetsOpen && !root.widgetsActive) return;
+        root.widgetsOpen = false;
+        widgetsCloseTimer.restart();
+    }
+
+    function toggleSession() {
+        if (root.sessionOpen) {
+            closeSession();
+        } else {
+            closeWidgets();
+            sessionCloseTimer.stop();
+            root.sessionActive = true;
+            root.sessionOpen = true;
+        }
+    }
+
+    function closeSession() {
+        if (!root.sessionOpen && !root.sessionActive) return;
+        root.sessionOpen = false;
+        sessionCloseTimer.restart();
+    }
+
+    function closeAllMenus() {
+        closeWidgets();
+        closeSession();
+    }
+
+    Timer {
+        id: widgetsCloseTimer
+        interval: 190
+        repeat: false
+        onTriggered: {
+            if (!root.widgetsOpen) root.widgetsActive = false;
+        }
+    }
+
+    Timer {
+        id: sessionCloseTimer
+        interval: 170
+        repeat: false
+        onTriggered: {
+            if (!root.sessionOpen) root.sessionActive = false;
+        }
+    }
+
+    // LabWC live ext_workspace_manager_v1 stream + activation
+    Process {
+        id: wlWsProc
+        command: ["python3", Quickshell.env("HOME") + "/.config/quickshell/scripts/wl_workspaces.py"]
+        running: !root.isSway
+        stdinEnabled: true
+        stdout: SplitParser {
+            onRead: line => {
+                try {
+                    const list = JSON.parse(line);
+                    if (Array.isArray(list) && list.length > 0) {
+                        root.desktopStates = list;
+                    }
+                } catch (e) {}
+            }
+        }
+    }
+
+    // Sway live workspace & window events
+    Process {
+        id: swaySub
+        command: ["swaymsg", "-t", "subscribe", "-m", "[\\"workspace\\",\\"window\\"]"]
+        running: root.isSway
+        stdout: SplitParser {
+            onRead: _ => root.refreshSwayWorkspaces()
+        }
+    }
+
+    Process {
+        id: swayTreePoll
+        command: ["swaymsg", "-t", "get_tree"]
+        running: root.isSway
+        stdout: StdioCollector {
+            onStreamFinished: {
+                try {
+                    const tree = JSON.parse(this.text || "{}");
+                    const t = root.findFocusedTitle(tree);
+                    root.swayFocusedTitle = t.length > 0 ? t : "Ready";
+                } catch (e) {}
+            }
+        }
+    }
+
+    Process {
+        id: swayWsPoll
+        command: ["swaymsg", "-t", "get_workspaces"]
+        running: root.isSway
+        stdout: StdioCollector {
+            onStreamFinished: {
+                try {
+                    const list = JSON.parse(this.text || "[]");
+                    const byNum = {};
+                    for (let i = 0; i < list.length; i++) {
+                        byNum[list[i].num] = list[i];
+                    }
+                    const next = [];
+                    for (let n = 1; n <= 6; n++) {
+                        const ws = byNum[n];
+                        next.push({
+                            num: n,
+                            focused: ws ? Boolean(ws.focused) : false,
+                            occupied: Boolean(ws),
+                            urgent: ws ? Boolean(ws.urgent) : false
+                        });
+                    }
+                    root.desktopStates = next;
+                } catch (e) {}
+            }
+        }
+    }
+
+    Process {
+        id: audioPollProc
+        command: ["sh", "-c", "pactl get-sink-volume @DEFAULT_SINK@ 2>/dev/null; echo ---; pactl get-sink-mute @DEFAULT_SINK@ 2>/dev/null"]
+        running: true
+        stdout: StdioCollector {
+            onStreamFinished: {
+                const sections = this.text.split("---");
+                if (sections.length >= 1) {
+                    const m = sections[0].match(/([0-9]+)%/);
+                    if (m) root.volumePct = parseInt(m[1], 10);
+                }
+                if (sections.length >= 2) {
+                    root.muted = (sections[1].indexOf("yes") >= 0);
+                }
+            }
+        }
+    }
+
+    Process {
+        id: sysDiagProc
+        command: ["python3", Quickshell.env("HOME") + "/.config/quickshell/scripts/sys_diag.py"]
+        running: true
+        stdout: SplitParser {
+            onRead: line => {
+                try {
+                    const d = JSON.parse(line);
+                    if (d.cpu !== undefined) root.cpuPct = d.cpu;
+                    if (d.mem_used !== undefined) root.memUsed = String(d.mem_used);
+                    if (d.mem_total !== undefined) root.memTotal = String(d.mem_total);
+                    if (d.mem_pct !== undefined) root.memPct = d.mem_pct;
+                    if (d.bat_pct !== undefined) root.batPct = d.bat_pct;
+                    if (d.bat_status !== undefined) root.batStatus = String(d.bat_status);
+                    if (d.temp_c !== null && d.temp_c !== undefined) root.tempC = d.temp_c;
+                    if (d.watts !== undefined) root.batWatts = String(d.watts);
+                    if (d.wifi_ok !== undefined) root.wifiOk = Boolean(d.wifi_ok);
+                    if (d.wifi_rate !== undefined) root.wifiRate = d.wifi_rate;
+                } catch (e) {}
+            }
+        }
+    }
+
+    Timer {
+        interval: 1000
+        running: true
+        repeat: true
+        onTriggered: {
+            root.clockText = Qt.formatDateTime(new Date(), "ddd d MMM  HH:mm");
+        }
+    }
+
+    Timer {
+        interval: 4000
+        running: true
+        repeat: true
+        onTriggered: root.refreshAudio()
+    }
+
+    Timer {
+        id: audioSyncDelay
+        interval: 150
+        repeat: false
+        onTriggered: root.refreshAudio()
+    }
+
+    component DockButton: Rectangle {
+        id: btn
+        property string iconText: ""
+        property string subText: ""
+        property color iconColor: root.colText
+        property color baseColor: root.colSurface
+        property color activeColor: root.colSurface1
+        property bool active: false
+        property int iconSize: 28
+        property int buttonHeight: 60
+        signal clicked()
+
+        implicitWidth: 92
+        implicitHeight: btn.buttonHeight
+        radius: 18
+        color: area.pressed ? root.colBlue : (btn.active ? btn.activeColor : btn.baseColor)
+        scale: area.pressed ? 0.92 : 1.0
+
+        Behavior on scale { NumberAnimation { duration: 80 } }
+        Behavior on color { ColorAnimation { duration: 100 } }
+
+        Column {
+            anchors.centerIn: parent
+            spacing: 1
+            Text {
+                anchors.horizontalCenter: parent.horizontalCenter
+                text: btn.iconText
+                color: area.pressed ? root.colDark : btn.iconColor
+                font.family: root.uiFont
+                font.pixelSize: btn.iconSize
+                lineHeight: 1.0
+            }
+            Text {
+                visible: btn.subText.length > 0
+                anchors.horizontalCenter: parent.horizontalCenter
+                text: btn.subText
+                color: area.pressed ? root.colDark : root.colSubtext
+                font.family: root.uiFont
+                font.pixelSize: 13
+                font.bold: true
+            }
+        }
+
+        MouseArea {
+            id: area
+            anchors.fill: parent
+            anchors.leftMargin: -16
+            anchors.rightMargin: -12
+            anchors.topMargin: -4
+            anchors.bottomMargin: -4
+            onClicked: btn.clicked()
+        }
+    }
+
+    // Top Status Bar (Wayland layer-shell replacement for Polybar)
+    PanelWindow {
+        id: topBarWindow
+        anchors {
+            left: true
+            top: true
+            right: true
+        }
+        margins {
+            left: 12
+            right: 12
+            top: 10
+        }
+        implicitHeight: 54
+        color: "transparent"
+        WlrLayershell.layer: WlrLayer.Top
+
+        Rectangle {
+            id: topBarBg
+            anchors.fill: parent
+            radius: 18
+            color: root.colBase
+            border.color: root.colSurface
+            border.width: 2
+
+            RowLayout {
+                anchors.fill: parent
+                anchors.leftMargin: 18
+                anchors.rightMargin: 18
+                spacing: 12
+
+                Rectangle {
+                    id: wmPill
+                    radius: 12
+                    color: root.colSurface
+                    implicitHeight: 36
+                    implicitWidth: wmRow.implicitWidth + 24
+                    Row {
+                        id: wmRow
+                        anchors.centerIn: parent
+                        spacing: 8
+                        Text {
+                            anchors.verticalCenter: parent.verticalCenter
+                            text: "\U000f0359"
+                            color: root.colBlue
+                            font.family: root.uiFont
+                            font.pixelSize: 18
+                        }
+                        Text {
+                            anchors.verticalCenter: parent.verticalCenter
+                            text: root.isSway ? "SWAY" : "LABWC"
+                            color: root.colText
+                            font.family: root.uiFont
+                            font.pixelSize: 15
+                            font.bold: true
+                        }
+                    }
+                }
+
+                Text {
+                    Layout.fillWidth: true
+                    Layout.maximumWidth: Math.max(80, topBarBg.width / 2 - wmPill.width - clockPill.width / 2 - 48)
+                    elide: Text.ElideRight
+                    text: root.focusedTitle
+                    color: root.focusedTitle === "Ready" ? root.colSubtext : root.colText
+                    font.family: root.uiFont
+                    font.pixelSize: 15
+                }
+
+                Item { Layout.fillWidth: true }
+
+                Row {
+                    spacing: 8
+
+                    // CPU %
+                    Rectangle {
+                        radius: 12
+                        color: root.colSurface
+                        implicitHeight: 36
+                        implicitWidth: cpuRow.implicitWidth + 22
+                        Row {
+                            id: cpuRow
+                            anchors.centerIn: parent
+                            spacing: 7
+                            Text {
+                                anchors.verticalCenter: parent.verticalCenter
+                                text: "\uf4bc"
+                                color: root.cpuPct >= 80 ? root.colRed : (root.cpuPct >= 50 ? root.colPeach : root.colTeal)
+                                font.family: root.uiFont
+                                font.pixelSize: 16
+                            }
+                            Text {
+                                anchors.verticalCenter: parent.verticalCenter
+                                text: root.cpuPct + "%"
+                                color: root.colText
+                                font.family: root.uiFont
+                                font.pixelSize: 15
+                                font.bold: true
+                            }
+                        }
+                    }
+
+                    // RAM
+                    Rectangle {
+                        radius: 12
+                        color: root.colSurface
+                        implicitHeight: 36
+                        implicitWidth: memRow.implicitWidth + 22
+                        Row {
+                            id: memRow
+                            anchors.centerIn: parent
+                            spacing: 7
+                            Text {
+                                anchors.verticalCenter: parent.verticalCenter
+                                text: "\U000f035b"
+                                color: root.memPct >= 85 ? root.colRed : root.colMauve
+                                font.family: root.uiFont
+                                font.pixelSize: 16
+                            }
+                            Text {
+                                anchors.verticalCenter: parent.verticalCenter
+                                text: root.memUsed + "/" + root.memTotal + "G (" + root.memPct + "%)"
+                                color: root.colText
+                                font.family: root.uiFont
+                                font.pixelSize: 15
+                                font.bold: true
+                            }
+                        }
+                    }
+
+                    // Battery Temperature
+                    Rectangle {
+                        visible: root.tempC >= 0
+                        radius: 12
+                        color: root.colSurface
+                        implicitHeight: 36
+                        implicitWidth: tempRow.implicitWidth + 22
+                        Row {
+                            id: tempRow
+                            anchors.centerIn: parent
+                            spacing: 6
+                            Text {
+                                anchors.verticalCenter: parent.verticalCenter
+                                text: "\U000f050f"
+                                color: root.tempC >= 43 ? root.colRed : (root.tempC >= 38 ? root.colPeach : root.colTeal)
+                                font.family: root.uiFont
+                                font.pixelSize: 16
+                            }
+                            Text {
+                                anchors.verticalCenter: parent.verticalCenter
+                                text: root.tempC.toFixed(1) + "°C"
+                                color: root.colText
+                                font.family: root.uiFont
+                                font.pixelSize: 15
+                                font.bold: true
+                            }
+                        }
+                    }
+
+                    // Wi-Fi
+                    Rectangle {
+                        radius: 12
+                        color: root.colSurface
+                        implicitHeight: 36
+                        implicitWidth: wifiRow.implicitWidth + 22
+                        Row {
+                            id: wifiRow
+                            anchors.centerIn: parent
+                            spacing: 7
+                            Text {
+                                anchors.verticalCenter: parent.verticalCenter
+                                text: root.wifiOk ? "\U000f05a9" : "\U000f05aa"
+                                color: root.wifiOk ? root.colBlue : root.colSubtext
+                                font.family: root.uiFont
+                                font.pixelSize: 16
+                            }
+                            Text {
+                                anchors.verticalCenter: parent.verticalCenter
+                                text: root.wifiOk ? (root.wifiRate > 0 ? root.wifiRate + "M" : "Wi-Fi") : "Off"
+                                color: root.wifiOk ? root.colText : root.colSubtext
+                                font.family: root.uiFont
+                                font.pixelSize: 15
+                                font.bold: true
+                            }
+                        }
+                    }
+
+                    // Volume
+                    Rectangle {
+                        radius: 12
+                        color: root.colSurface
+                        implicitHeight: 36
+                        implicitWidth: volRow.implicitWidth + 22
+                        Row {
+                            id: volRow
+                            anchors.centerIn: parent
+                            spacing: 7
+                            Text {
+                                anchors.verticalCenter: parent.verticalCenter
+                                text: root.muted ? "\U000f075f" : "\U000f057e"
+                                color: root.muted ? root.colRed : root.colGreen
+                                font.family: root.uiFont
+                                font.pixelSize: 16
+                            }
+                            Text {
+                                anchors.verticalCenter: parent.verticalCenter
+                                text: root.muted ? "MUTE" : (root.volumePct + "%")
+                                color: root.colText
+                                font.family: root.uiFont
+                                font.pixelSize: 15
+                                font.bold: true
+                            }
+                        }
+                    }
+
+                    // Battery % + Power Draw
+                    Rectangle {
+                        radius: 12
+                        color: root.colSurface
+                        implicitHeight: 36
+                        implicitWidth: batRow.implicitWidth + 22
+                        Row {
+                            id: batRow
+                            anchors.centerIn: parent
+                            spacing: 7
+                            Text {
+                                anchors.verticalCenter: parent.verticalCenter
+                                text: root.batStatus === "CHARGING" ? "\uf0e7" : (root.batPct >= 85 ? "\uf240" : (root.batPct >= 60 ? "\uf241" : (root.batPct >= 35 ? "\uf242" : (root.batPct >= 15 ? "\uf243" : "\uf244"))))
+                                color: root.batStatus === "CHARGING" || root.batPct >= 85 ? root.colGreen : (root.batPct >= 35 ? root.colText : (root.batPct >= 15 ? root.colPeach : root.colRed))
+                                font.family: root.uiFont
+                                font.pixelSize: 16
+                            }
+                            Text {
+                                anchors.verticalCenter: parent.verticalCenter
+                                text: root.batPct >= 0 ? (root.batPct + "%" + (root.batWatts.length > 0 ? " " + root.batWatts : "")) : "BAT --"
+                                color: root.colText
+                                font.family: root.uiFont
+                                font.pixelSize: 15
+                                font.bold: true
+                            }
+                        }
+                    }
+                }
+            }
+
+            Rectangle {
+                id: clockPill
+                anchors.centerIn: parent
+                radius: 12
+                color: root.colSurface
+                height: 36
+                width: clockRow.implicitWidth + 24
+                Row {
+                    id: clockRow
+                    anchors.centerIn: parent
+                    spacing: 8
+                    Text {
+                        anchors.verticalCenter: parent.verticalCenter
+                        text: "\uf017"
+                        color: root.colBlue
+                        font.family: root.uiFont
+                        font.pixelSize: 16
+                    }
+                    Text {
+                        anchors.verticalCenter: parent.verticalCenter
+                        text: root.clockText
+                        color: root.colBlue
+                        font.family: root.uiFont
+                        font.pixelSize: 16
+                        font.bold: true
+                    }
+                }
+            }
+        }
+    }
+
+    // Left Touch Dock
+    PanelWindow {
+        id: dockWindow
+        anchors {
+            left: true
+            top: true
+            bottom: true
+        }
+        margins {
+            left: 0
+            top: 12
+            bottom: 12
+        }
+        implicitWidth: 128
+        color: "transparent"
+        WlrLayershell.layer: WlrLayer.Top
+
+        readonly property bool compactDock: height > 0 && height < 1200
+
+        Rectangle {
+            id: barBg
+            anchors.fill: parent
+            anchors.leftMargin: 12
+            radius: 24
+            color: root.colBase
+            border.color: root.colSurface
+            border.width: 2
+
+            ColumnLayout {
+                anchors.fill: parent
+                anchors.topMargin: dockWindow.compactDock ? 8 : 14
+                anchors.bottomMargin: dockWindow.compactDock ? 8 : 14
+                spacing: dockWindow.compactDock ? 4 : 8
+
+                // Top: Touch Launchers
+                Column {
+                    Layout.alignment: Qt.AlignHCenter
+                    spacing: dockWindow.compactDock ? 6 : 12
+
+                    DockButton {
+                        iconText: "\U000f003b"
+                        iconColor: root.colBlue
+                        iconSize: dockWindow.compactDock ? 26 : 34
+                        buttonHeight: dockWindow.compactDock ? 44 : 66
+                        onClicked: {
+                            root.closeAllMenus();
+                            root.runCmd(["rofi", "-show", "drun"]);
+                        }
+                    }
+                    DockButton {
+                        iconText: "\uf120"
+                        iconColor: root.colTeal
+                        iconSize: dockWindow.compactDock ? 24 : 30
+                        buttonHeight: dockWindow.compactDock ? 44 : 66
+                        onClicked: {
+                            root.closeAllMenus();
+                            root.runCmd(["sh", "-c", "if command -v foot >/dev/null 2>&1; then exec foot; elif command -v xfce4-terminal >/dev/null 2>&1; then exec xfce4-terminal; else exec alacritty; fi"]);
+                        }
+                    }
+                    DockButton {
+                        iconText: "\uf2d2"
+                        iconColor: root.colMauve
+                        iconSize: dockWindow.compactDock ? 24 : 30
+                        buttonHeight: dockWindow.compactDock ? 44 : 66
+                        onClicked: {
+                            root.closeAllMenus();
+                            root.runCmd(["rofi", "-show", "window"]);
+                        }
+                    }
+                }
+
+                Rectangle {
+                    Layout.alignment: Qt.AlignHCenter
+                    width: 60
+                    height: 2
+                    radius: 1
+                    color: root.colSurface1
+                }
+
+                // Middle: Workspaces (1-6) + Layout/Window Toggle
+                Column {
+                    Layout.alignment: Qt.AlignHCenter
+                    spacing: dockWindow.compactDock ? 5 : 12
+
+                    Repeater {
+                        model: root.desktopStates
+                        delegate: Rectangle {
+                            required property var modelData
+                            width: 92
+                            height: dockWindow.compactDock ? 36 : 58
+                            radius: 18
+                            scale: wsArea.pressed ? 0.92 : 1.0
+                            color: modelData.focused
+                                ? root.colBlue
+                                : (modelData.urgent
+                                    ? root.colRed
+                                    : (modelData.occupied ? root.colSurface : "transparent"))
+                            border.color: (!modelData.focused && modelData.occupied) ? root.colSurface1 : "transparent"
+                            border.width: 1
+
+                            Behavior on scale { NumberAnimation { duration: 80 } }
+                            Behavior on color { ColorAnimation { duration: 100 } }
+
+                            Row {
+                                anchors.centerIn: parent
+                                spacing: 6
+                                Text {
+                                    text: String(modelData.num)
+                                    color: (modelData.focused || modelData.urgent) ? root.colDark : (modelData.occupied ? root.colText : root.colSubtext)
+                                    font.family: root.uiFont
+                                    font.pixelSize: dockWindow.compactDock ? 18 : 24
+                                    font.bold: modelData.focused || modelData.occupied
+                                }
+                                Rectangle {
+                                    visible: modelData.occupied && !modelData.focused
+                                    anchors.verticalCenter: parent.verticalCenter
+                                    width: 8
+                                    height: 8
+                                    radius: 4
+                                    color: root.colBlue
+                                }
+                            }
+
+                            MouseArea {
+                                id: wsArea
+                                anchors.fill: parent
+                                anchors.leftMargin: -16
+                                anchors.rightMargin: -12
+                                anchors.topMargin: -4
+                                anchors.bottomMargin: -4
+                                onClicked: {
+                                    if (root.isSway) {
+                                        root.runCmd(["swaymsg", "workspace", "number", String(modelData.num)]);
+                                    } else {
+                                        wlWsProc.write(String(modelData.num) + "\\n");
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    DockButton {
+                        visible: root.isSway
+                        buttonHeight: dockWindow.compactDock ? 42 : 56
+                        iconText: "\U000f0573"
+                        subText: dockWindow.compactDock ? "" : "LAY"
+                        iconColor: root.colSubtext
+                        iconSize: dockWindow.compactDock ? 20 : 24
+                        onClicked: root.runCmd(["swaymsg", "layout", "toggle", "tabbed", "split"])
+                    }
+                }
+
+                // Empty Dock Spacer -> Click to Toggle Widget Drawer
+                Item {
+                    Layout.fillWidth: true
+                    Layout.fillHeight: true
+                    Layout.minimumHeight: dockWindow.compactDock ? 32 : 60
+
+                    Column {
+                        anchors.centerIn: parent
+                        spacing: 6
+                        Text {
+                            anchors.horizontalCenter: parent.horizontalCenter
+                            text: root.widgetsOpen ? "\U000f0141" : "\U000f0142"
+                            color: root.widgetsOpen ? root.colBlue : root.colSubtext
+                            font.family: root.uiFont
+                            font.pixelSize: 22
+                        }
+                        Rectangle {
+                            anchors.horizontalCenter: parent.horizontalCenter
+                            width: 6
+                            height: dockWindow.compactDock ? 20 : 44
+                            radius: 3
+                            color: root.widgetsOpen ? root.colBlue : root.colSurface1
+                            Behavior on color { ColorAnimation { duration: 120 } }
+                        }
+                    }
+
+                    MouseArea {
+                        id: drawerToggleArea
+                        anchors.fill: parent
+                        onClicked: root.toggleWidgets()
+                    }
+                }
+
+                Rectangle {
+                    Layout.alignment: Qt.AlignHCenter
+                    width: 60
+                    height: 2
+                    radius: 1
+                    color: root.colSurface1
+                }
+
+                // Bottom: Window Controls + Volume + Session Power
+                Column {
+                    Layout.alignment: Qt.AlignHCenter
+                    spacing: dockWindow.compactDock ? 5 : 10
+
+                    DockButton {
+                        buttonHeight: dockWindow.compactDock ? 36 : 56
+                        iconText: "\uf2d0"
+                        iconColor: root.colText
+                        iconSize: dockWindow.compactDock ? 20 : 26
+                        onClicked: {
+                            if (root.isSway) {
+                                root.runCmd(["swaymsg", "floating", "toggle"]);
+                            } else if (ToplevelManager.activeToplevel) {
+                                ToplevelManager.activeToplevel.maximized = !ToplevelManager.activeToplevel.maximized;
+                            }
+                        }
+                    }
+                    DockButton {
+                        buttonHeight: dockWindow.compactDock ? 36 : 56
+                        iconText: "\uf065"
+                        iconColor: root.colText
+                        iconSize: dockWindow.compactDock ? 20 : 26
+                        onClicked: {
+                            if (root.isSway) {
+                                root.runCmd(["swaymsg", "fullscreen", "toggle"]);
+                            } else if (ToplevelManager.activeToplevel) {
+                                ToplevelManager.activeToplevel.fullscreen = !ToplevelManager.activeToplevel.fullscreen;
+                            }
+                        }
+                    }
+                    DockButton {
+                        buttonHeight: dockWindow.compactDock ? 36 : 56
+                        iconText: "\uf00d"
+                        iconColor: root.colRed
+                        iconSize: dockWindow.compactDock ? 22 : 28
+                        onClicked: {
+                            if (root.isSway) {
+                                root.runCmd(["swaymsg", "kill"]);
+                            } else if (ToplevelManager.activeToplevel) {
+                                ToplevelManager.activeToplevel.close();
+                            }
+                        }
+                    }
+
+                    Rectangle {
+                        anchors.horizontalCenter: parent.horizontalCenter
+                        width: 60
+                        height: 2
+                        radius: 1
+                        color: root.colSurface1
+                    }
+
+                    DockButton {
+                        buttonHeight: dockWindow.compactDock ? 34 : 50
+                        iconText: "\U000f0415"
+                        iconColor: root.colText
+                        iconSize: dockWindow.compactDock ? 20 : 26
+                        onClicked: {
+                            root.runCmd(["pactl", "set-sink-volume", "@DEFAULT_SINK@", "+5%"]);
+                            audioSyncDelay.restart();
+                        }
+                    }
+                    DockButton {
+                        buttonHeight: dockWindow.compactDock ? 46 : 66
+                        iconText: root.muted ? "\U000f075f" : "\U000f057e"
+                        subText: root.muted ? "MUTE" : (root.volumePct + "%")
+                        iconColor: root.muted ? root.colRed : root.colGreen
+                        iconSize: dockWindow.compactDock ? 20 : 24
+                        onClicked: {
+                            root.runCmd(["pactl", "set-sink-mute", "@DEFAULT_SINK@", "toggle"]);
+                            audioSyncDelay.restart();
+                        }
+                    }
+                    DockButton {
+                        buttonHeight: dockWindow.compactDock ? 34 : 50
+                        iconText: "\U000f0374"
+                        iconColor: root.colText
+                        iconSize: dockWindow.compactDock ? 20 : 26
+                        onClicked: {
+                            root.runCmd(["pactl", "set-sink-volume", "@DEFAULT_SINK@", "-5%"]);
+                            audioSyncDelay.restart();
+                        }
+                    }
+
+                    DockButton {
+                        id: sessionBtn
+                        buttonHeight: dockWindow.compactDock ? 42 : 62
+                        iconText: "\uf011"
+                        iconColor: root.sessionOpen ? root.colDark : root.colRed
+                        baseColor: root.sessionOpen ? root.colRed : root.colSurface
+                        iconSize: dockWindow.compactDock ? 22 : 28
+                        onClicked: root.toggleSession()
+                    }
+                }
+            }
+        }
+    }
+
+    // Native Wayland Outside-Click / Escape Dismiss Backdrop
+    PanelWindow {
+        id: dismissBackdrop
+        anchors {
+            left: true
+            right: true
+            top: true
+            bottom: true
+        }
+        visible: root.widgetsActive || root.sessionActive
+        color: "transparent"
+        exclusionMode: ExclusionMode.Ignore
+        WlrLayershell.layer: WlrLayer.Top
+        WlrLayershell.keyboardFocus: WlrKeyboardFocus.OnDemand
+
+        MouseArea {
+            anchors.fill: parent
+            onClicked: root.closeAllMenus()
+        }
+        Shortcut {
+            sequence: "Escape"
+            onActivated: root.closeAllMenus()
+        }
+    }
+
+    // Large Readable Widget Drawer (Overlay layer matching dock height)
+    PanelWindow {
+        id: widgetsPopup
+        anchors {
+            left: true
+            top: true
+            bottom: true
+        }
+        margins {
+            left: 140
+            top: 76
+            bottom: 12
+        }
+        implicitWidth: 844
+        visible: root.widgetsActive
+        color: "transparent"
+        exclusionMode: ExclusionMode.Ignore
+        WlrLayershell.layer: WlrLayer.Overlay
+
+        Item {
+            anchors.fill: parent
+            clip: true
+
+            Rectangle {
+                id: drawerBg
+                width: parent.width
+                height: parent.height
+                x: root.widgetsOpen ? 0 : -44
+                opacity: root.widgetsOpen ? 1.0 : 0.0
+                radius: 24
+                color: root.colPopupBase
+                border.color: root.colSurface1
+                border.width: 2
+
+                Behavior on x { NumberAnimation { duration: 180; easing.type: Easing.OutCubic } }
+                Behavior on opacity { NumberAnimation { duration: 140 } }
+
+                Flickable {
+                    anchors.fill: parent
+                    anchors.margins: 28
+                    contentWidth: width
+                    contentHeight: drawerCol.implicitHeight
+                    clip: true
+                    boundsBehavior: Flickable.StopAtBounds
+                    interactive: contentHeight > height
+
+                    ColumnLayout {
+                        id: drawerCol
+                        width: parent.width
+                        spacing: 20
+
+                        RowLayout {
+                            Layout.fillWidth: true
+                            Row {
+                                spacing: 14
+                                Layout.fillWidth: true
+                                Text {
+                                    anchors.verticalCenter: parent.verticalCenter
+                                    text: "\U000f003b"
+                                    color: root.colBlue
+                                    font.family: root.uiFont
+                                    font.pixelSize: 34
+                                }
+                                Text {
+                                    anchors.verticalCenter: parent.verticalCenter
+                                    text: "Widgets"
+                                    color: root.colText
+                                    font.family: root.uiFont
+                                    font.pixelSize: 30
+                                    font.bold: true
+                                }
+                            }
+                            Rectangle {
+                                width: 48
+                                height: 48
+                                radius: 16
+                                color: closeBtnArea.pressed ? root.colBlue : root.colSurface
+                                border.color: root.colSurface1
+                                border.width: 1
+                                Text {
+                                    anchors.centerIn: parent
+                                    text: "\uf00d"
+                                    color: closeBtnArea.pressed ? root.colDark : root.colSubtext
+                                    font.family: root.uiFont
+                                    font.pixelSize: 22
+                                }
+                                MouseArea {
+                                    id: closeBtnArea
+                                    anchors.fill: parent
+                                    onClicked: root.closeWidgets()
+                                }
+                            }
+                        }
+
+                        RowLayout {
+                            Layout.fillWidth: true
+                            spacing: 18
+
+                            Rectangle {
+                                Layout.fillWidth: true
+                                implicitHeight: weatherCol.implicitHeight + 40
+                                radius: 20
+                                color: root.colSurface
+                                border.color: root.colSurface1
+                                border.width: 1
+
+                                Column {
+                                    id: weatherCol
+                                    anchors.fill: parent
+                                    anchors.margins: 20
+                                    spacing: 8
+                                    Row {
+                                        spacing: 12
+                                        Text {
+                                            anchors.verticalCenter: parent.verticalCenter
+                                            text: "\U000f0599"
+                                            color: root.colPeach
+                                            font.family: root.uiFont
+                                            font.pixelSize: 38
+                                        }
+                                        Text {
+                                            anchors.verticalCenter: parent.verticalCenter
+                                            text: "22°C"
+                                            color: root.colText
+                                            font.family: root.uiFont
+                                            font.pixelSize: 32
+                                            font.bold: true
+                                        }
+                                    }
+                                    Text {
+                                        text: "Clear Sky · Feels 21°C"
+                                        color: root.colSubtext
+                                        font.family: root.uiFont
+                                        font.pixelSize: 21
+                                    }
+                                }
+                            }
+
+                            Rectangle {
+                                Layout.fillWidth: true
+                                implicitHeight: focusCol.implicitHeight + 40
+                                radius: 20
+                                color: root.colSurface
+                                border.color: root.colSurface1
+                                border.width: 1
+
+                                Column {
+                                    id: focusCol
+                                    anchors.fill: parent
+                                    anchors.margins: 20
+                                    spacing: 8
+                                    Row {
+                                        spacing: 12
+                                        Text {
+                                            anchors.verticalCenter: parent.verticalCenter
+                                            text: "\U000f05a9"
+                                            color: root.colTeal
+                                            font.family: root.uiFont
+                                            font.pixelSize: 38
+                                        }
+                                        Text {
+                                            anchors.verticalCenter: parent.verticalCenter
+                                            text: "Termux"
+                                            color: root.colText
+                                            font.family: root.uiFont
+                                            font.pixelSize: 32
+                                            font.bold: true
+                                        }
+                                    }
+                                    Text {
+                                        text: "Do Not Disturb · On"
+                                        color: root.colSubtext
+                                        font.family: root.uiFont
+                                        font.pixelSize: 21
+                                    }
+                                }
+                            }
+                        }
+
+                        Rectangle {
+                            Layout.fillWidth: true
+                            implicitHeight: spotifyCol.implicitHeight + 44
+                            radius: 20
+                            color: root.colSurface
+                            border.color: root.colSurface1
+                            border.width: 1
+
+                            Column {
+                                id: spotifyCol
+                                anchors.fill: parent
+                                anchors.leftMargin: 24
+                                anchors.rightMargin: 24
+                                anchors.topMargin: 22
+                                anchors.bottomMargin: 22
+                                spacing: 18
+
+                                Row {
+                                    width: parent.width
+                                    spacing: 20
+                                    Rectangle {
+                                        width: 112
+                                        height: 112
+                                        radius: 18
+                                        color: root.colSurface1
+                                        Text {
+                                            anchors.centerIn: parent
+                                            text: "\U000f04c7"
+                                            color: root.colGreen
+                                            font.family: root.uiFont
+                                            font.pixelSize: 54
+                                        }
+                                    }
+                                    Column {
+                                        anchors.verticalCenter: parent.verticalCenter
+                                        spacing: 6
+                                        Text {
+                                            text: "NOW PLAYING"
+                                            color: root.colGreen
+                                            font.family: root.uiFont
+                                            font.pixelSize: 16
+                                            font.bold: true
+                                        }
+                                        Text {
+                                            text: "Midnight City"
+                                            color: root.colText
+                                            font.family: root.uiFont
+                                            font.pixelSize: 27
+                                            font.bold: true
+                                        }
+                                        Text {
+                                            text: "M83 · Hurry Up, We're Dreaming"
+                                            color: root.colSubtext
+                                            font.family: root.uiFont
+                                            font.pixelSize: 22
+                                        }
+                                    }
+                                }
+
+                                Column {
+                                    width: parent.width
+                                    spacing: 8
+                                    Rectangle {
+                                        width: parent.width
+                                        height: 10
+                                        radius: 5
+                                        color: root.colSurface1
+                                        Rectangle {
+                                            width: parent.width * 0.46
+                                            height: parent.height
+                                            radius: 5
+                                            color: root.colGreen
+                                        }
+                                    }
+                                    RowLayout {
+                                        width: parent.width
+                                        Text {
+                                            text: "1:42"
+                                            color: root.colSubtext
+                                            font.family: root.uiFont
+                                            font.pixelSize: 19
+                                            font.bold: true
+                                        }
+                                        Item { Layout.fillWidth: true }
+                                        Text {
+                                            text: "3:55"
+                                            color: root.colSubtext
+                                            font.family: root.uiFont
+                                            font.pixelSize: 19
+                                            font.bold: true
+                                        }
+                                    }
+                                }
+
+                                Row {
+                                    anchors.horizontalCenter: parent.horizontalCenter
+                                    spacing: 40
+                                    Text {
+                                        anchors.verticalCenter: parent.verticalCenter
+                                        text: "\U000f04ae"
+                                        color: root.colSubtext
+                                        font.family: root.uiFont
+                                        font.pixelSize: 32
+                                    }
+                                    Rectangle {
+                                        width: 62
+                                        height: 62
+                                        radius: 31
+                                        color: root.colGreen
+                                        Text {
+                                            anchors.centerIn: parent
+                                            text: "\U000f03e4"
+                                            color: root.colDark
+                                            font.family: root.uiFont
+                                            font.pixelSize: 30
+                                        }
+                                    }
+                                    Text {
+                                        anchors.verticalCenter: parent.verticalCenter
+                                        text: "\U000f04ad"
+                                        color: root.colSubtext
+                                        font.family: root.uiFont
+                                        font.pixelSize: 32
+                                    }
+                                }
+                            }
+                        }
+
+                        Rectangle {
+                            Layout.fillWidth: true
+                            implicitHeight: calCol.implicitHeight + 44
+                            radius: 20
+                            color: root.colSurface
+                            border.color: root.colSurface1
+                            border.width: 1
+
+                            Column {
+                                id: calCol
+                                anchors.fill: parent
+                                anchors.leftMargin: 24
+                                anchors.rightMargin: 24
+                                anchors.topMargin: 22
+                                anchors.bottomMargin: 22
+                                spacing: 14
+
+                                RowLayout {
+                                    width: parent.width
+                                    Row {
+                                        spacing: 12
+                                        Text {
+                                            anchors.verticalCenter: parent.verticalCenter
+                                            text: "\U000f00ed"
+                                            color: root.colBlue
+                                            font.family: root.uiFont
+                                            font.pixelSize: 28
+                                        }
+                                        Text {
+                                            anchors.verticalCenter: parent.verticalCenter
+                                            text: "November 2026"
+                                            color: root.colText
+                                            font.family: root.uiFont
+                                            font.pixelSize: 24
+                                            font.bold: true
+                                        }
+                                    }
+                                    Item { Layout.fillWidth: true }
+                                    Text {
+                                        text: "\U000f0141   \U000f0142"
+                                        color: root.colSubtext
+                                        font.family: root.uiFont
+                                        font.pixelSize: 24
+                                    }
+                                }
+
+                                GridLayout {
+                                    width: parent.width
+                                    columns: 7
+                                    columnSpacing: 6
+                                    rowSpacing: 8
+
+                                    Repeater {
+                                        model: root.calendarHeaders
+                                        delegate: Item {
+                                            required property string modelData
+                                            Layout.fillWidth: true
+                                            implicitHeight: 42
+                                            Text {
+                                                anchors.centerIn: parent
+                                                text: modelData
+                                                color: root.colSubtext
+                                                font.family: root.uiFont
+                                                font.pixelSize: 21
+                                                font.bold: true
+                                            }
+                                        }
+                                    }
+
+                                    Repeater {
+                                        model: root.calendarDays
+                                        delegate: Rectangle {
+                                            required property var modelData
+                                            Layout.fillWidth: true
+                                            implicitHeight: 46
+                                            radius: 14
+                                            color: modelData.cls === "today" ? root.colBlue : "transparent"
+                                            Text {
+                                                anchors.centerIn: parent
+                                                text: modelData.d
+                                                color: modelData.cls === "today"
+                                                    ? root.colDark
+                                                    : (modelData.cls === "muted"
+                                                        ? root.colSurface1
+                                                        : (modelData.cls === "wknd" ? root.colSubtext : root.colText))
+                                                font.family: root.uiFont
+                                                font.pixelSize: 23
+                                                font.bold: modelData.cls === "today"
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        Rectangle {
+                            Layout.fillWidth: true
+                            Layout.fillHeight: true
+                            implicitHeight: agendaCol.implicitHeight + 44
+                            radius: 20
+                            color: root.colSurface
+                            border.color: root.colSurface1
+                            border.width: 1
+
+                            Column {
+                                id: agendaCol
+                                anchors.fill: parent
+                                anchors.leftMargin: 24
+                                anchors.rightMargin: 24
+                                anchors.topMargin: 22
+                                anchors.bottomMargin: 22
+                                spacing: 14
+
+                                Row {
+                                    spacing: 12
+                                    Text {
+                                        anchors.verticalCenter: parent.verticalCenter
+                                        text: "\U000f039a"
+                                        color: root.colMauve
+                                        font.family: root.uiFont
+                                        font.pixelSize: 28
+                                    }
+                                    Text {
+                                        anchors.verticalCenter: parent.verticalCenter
+                                        text: "Agenda"
+                                        color: root.colText
+                                        font.family: root.uiFont
+                                        font.pixelSize: 24
+                                        font.bold: true
+                                    }
+                                }
+
+                                Repeater {
+                                    model: [
+                                        { t: "19:00", col: root.colBlue, txt: "Build Termux X11 Dock" },
+                                        { t: "21:30", col: root.colMauve, txt: "Sync Dotfiles & GUI Rules" },
+                                        { t: "22:45", col: root.colTeal, txt: "Wrap Up Workspace Widgets" }
+                                    ]
+                                    delegate: Rectangle {
+                                        required property var modelData
+                                        width: parent.width
+                                        height: 54
+                                        radius: 14
+                                        color: root.colPopupBase
+                                        border.color: root.colSurface1
+                                        border.width: 1
+                                        Row {
+                                            anchors.verticalCenter: parent.verticalCenter
+                                            anchors.left: parent.left
+                                            anchors.leftMargin: 16
+                                            spacing: 16
+                                            Text {
+                                                anchors.verticalCenter: parent.verticalCenter
+                                                text: modelData.t
+                                                color: modelData.col
+                                                font.family: root.uiFont
+                                                font.pixelSize: 21
+                                                font.bold: true
+                                            }
+                                            Text {
+                                                anchors.verticalCenter: parent.verticalCenter
+                                                text: modelData.txt
+                                                color: root.colText
+                                                font.family: root.uiFont
+                                                font.pixelSize: 21
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // Raised Session Menu (Bottom-left overlay)
+    PanelWindow {
+        id: sessionPopup
+        anchors {
+            left: true
+            bottom: true
+        }
+        margins {
+            left: 140
+            bottom: 12
+        }
+        implicitWidth: 330
+        implicitHeight: 368
+        visible: root.sessionActive
+        color: "transparent"
+        exclusionMode: ExclusionMode.Ignore
+        WlrLayershell.layer: WlrLayer.Overlay
+
+        Item {
+            anchors.fill: parent
+            clip: true
+
+            Rectangle {
+                width: parent.width
+                height: 330
+                y: root.sessionOpen ? 0 : 28
+                opacity: root.sessionOpen ? 1.0 : 0.0
+                radius: 22
+                color: root.colPopupBase
+                border.color: root.colSurface1
+                border.width: 2
+
+                Behavior on y { NumberAnimation { duration: 160; easing.type: Easing.OutCubic } }
+                Behavior on opacity { NumberAnimation { duration: 130 } }
+
+                Column {
+                    anchors.fill: parent
+                    anchors.margins: 18
+                    spacing: 18
+
+                    Repeater {
+                        model: [
+                            { label: "Reload Shell", icon: "\uf021", color: root.colBlue, cmd: ["sh", "-c", "$HOME/.config/quickshell/launch-wayland.sh &"] },
+                            { label: "Reload WM", icon: "\uf021", color: root.colTeal, cmd: root.isSway ? ["swaymsg", "reload"] : ["labwc", "--reconfigure"] },
+                            { label: "Exit Wayland", icon: "\uf011", color: root.colRed, cmd: root.isSway ? ["swaymsg", "exit"] : ["labwc", "--exit"] }
+                        ]
+                        delegate: Rectangle {
+                            required property var modelData
+                            width: parent.width
+                            height: 86
+                            radius: 16
+                            color: popArea.pressed ? root.colBlue : root.colSurface
+                            Row {
+                                anchors.verticalCenter: parent.verticalCenter
+                                anchors.left: parent.left
+                                anchors.leftMargin: 20
+                                spacing: 16
+                                Text {
+                                    anchors.verticalCenter: parent.verticalCenter
+                                    text: modelData.icon
+                                    color: popArea.pressed ? root.colDark : modelData.color
+                                    font.family: root.uiFont
+                                    font.pixelSize: 26
+                                }
+                                Text {
+                                    anchors.verticalCenter: parent.verticalCenter
+                                    text: modelData.label
+                                    color: popArea.pressed ? root.colDark : root.colText
+                                    font.family: root.uiFont
+                                    font.pixelSize: 21
+                                    font.bold: true
+                                }
+                            }
+                            MouseArea {
+                                id: popArea
+                                anchors.fill: parent
+                                anchors.leftMargin: -18
+                                anchors.rightMargin: -18
+                                anchors.topMargin: -9
+                                anchors.bottomMargin: -9
+                                onClicked: {
+                                    root.closeSession();
+                                    root.runCmd(modelData.cmd);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+"""
+
+HIDE_CURSOR_PY = """#!/data/data/com.termux/files/usr/bin/python3
+\"\"\"Auto-hide the X11 cursor when idle or right after simulated touch taps.\"\"\"
+
+import os
+import signal
+import sys
+import time
+from ctypes import CDLL, byref, c_char_p, c_int, c_uint, c_ulong, c_void_p
+
+
+def main() -> int:
+    x11 = CDLL("libX11.so.6")
+    xf = CDLL("libXfixes.so")
+
+    x11.XOpenDisplay.restype = c_void_p
+    x11.XOpenDisplay.argtypes = [c_char_p]
+    x11.XDefaultRootWindow.restype = c_ulong
+    x11.XDefaultRootWindow.argtypes = [c_void_p]
+    x11.XSync.argtypes = [c_void_p, c_int]
+    x11.XQueryPointer.restype = c_int
+    x11.XQueryPointer.argtypes = [
+        c_void_p, c_ulong, c_void_p, c_void_p,
+        c_void_p, c_void_p, c_void_p, c_void_p, c_void_p,
+    ]
+    x11.XCloseDisplay.argtypes = [c_void_p]
+
+    xf.XFixesQueryExtension.argtypes = [c_void_p, c_void_p, c_void_p]
+    xf.XFixesQueryVersion.argtypes = [c_void_p, c_void_p, c_void_p]
+    xf.XFixesHideCursor.argtypes = [c_void_p, c_ulong]
+    xf.XFixesShowCursor.argtypes = [c_void_p, c_ulong]
+
+    disp_name = os.environ.get("DISPLAY", ":0").encode()
+    dpy = x11.XOpenDisplay(disp_name)
+    if not dpy:
+        return 1
+
+    ev, er = c_int(), c_int()
+    if not xf.XFixesQueryExtension(dpy, byref(ev), byref(er)):
+        return 1
+    maj, minv = c_int(5), c_int(0)
+    xf.XFixesQueryVersion(dpy, byref(maj), byref(minv))
+
+    root = x11.XDefaultRootWindow(dpy)
+    r_win, c_win = c_ulong(), c_ulong()
+    rx, ry, wx, wy = c_int(), c_int(), c_int(), c_int()
+    mask = c_uint()
+
+    running = True
+
+    def stop(_signum, _frame):
+        nonlocal running
+        running = False
+
+    signal.signal(signal.SIGTERM, stop)
+    signal.signal(signal.SIGINT, stop)
+
+    pid_path = os.path.join(
+        os.environ.get("TMPDIR", "/data/data/com.termux/files/usr/tmp"),
+        "hide-cursor.pid",
+    )
+    try:
+        with open(pid_path, "w") as pf:
+            pf.write(str(os.getpid()))
+    except OSError:
+        pid_path = ""
+
+    x11.XQueryPointer(dpy, root, byref(r_win), byref(c_win), byref(rx), byref(ry), byref(wx), byref(wy), byref(mask))
+    last_x, last_y = rx.value, ry.value
+    was_pressed = bool(mask.value & 0x1F00)
+    hidden = True
+    xf.XFixesHideCursor(dpy, root)
+    x11.XSync(dpy, 0)
+    hide_at = 0.0
+
+    while running:
+        time.sleep(0.08)
+        if not x11.XQueryPointer(
+            dpy, root, byref(r_win), byref(c_win), byref(rx), byref(ry), byref(wx), byref(wy), byref(mask)
+        ):
+            break
+
+        now = time.monotonic()
+        moved = (rx.value != last_x) or (ry.value != last_y)
+        pressed = bool(mask.value & 0x1F00)
+        last_x, last_y = rx.value, ry.value
+
+        if pressed:
+            was_pressed = True
+            hide_at = now + 0.5
+        elif was_pressed and not pressed:
+            # Touch tap / click finished: hide quickly so no stray cursor lingers
+            was_pressed = False
+            hide_at = now + 0.15
+            if not hidden:
+                xf.XFixesHideCursor(dpy, root)
+                x11.XSync(dpy, 0)
+                hidden = True
+        elif moved:
+            if hidden:
+                xf.XFixesShowCursor(dpy, root)
+                x11.XSync(dpy, 0)
+                hidden = False
+            hide_at = now + 0.6
+        elif not hidden and now >= hide_at:
+            xf.XFixesHideCursor(dpy, root)
+            x11.XSync(dpy, 0)
+            hidden = True
+
+    if hidden:
+        xf.XFixesShowCursor(dpy, root)
+        x11.XSync(dpy, 0)
+    if pid_path:
+        try:
+            os.remove(pid_path)
+        except OSError:
+            pass
+    x11.XCloseDisplay(dpy)
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
+"""
+
+ROFI_CONFIG = """/* Catppuccin Mocha touch-coherent Rofi theme matching Eww & Polybar */
+configuration {
+    modi: "drun,run,window";
+    font: "JetBrainsMono Nerd Font 17";
+    show-icons: false;
+    display-drun: "󰀻 Apps";
+    display-run: " Run";
+    display-window: " Win";
+    drun-display-format: "{name}";
+    click-to-exit: true;
+    me-select-entry: "";
+    me-accept-entry: "MousePrimary";
+}
+
+* {
+    base: #1e1e2e;
+    base-glass: rgba(30, 30, 46, 95 %);
+    surface: #313244;
+    surface1: #45475a;
+    text: #cdd6f4;
+    subtext: #a6adc8;
+    blue: #89b4fa;
+    red: #f38ba8;
+    dark: #1e1e2e;
+    transparent: rgba(0, 0, 0, 0 %);
+
+    background-color: @transparent;
+    text-color: @text;
+}
+
+window {
+    width: 720px;
+    background-color: @base-glass;
+    border: 2px;
+    border-color: @surface1;
+    border-radius: 22px;
+    padding: 18px;
+}
+
+mainbox {
+    spacing: 14px;
+    children: [ inputbar, listview, mode-switcher ];
+}
+
+inputbar {
+    children: [ prompt, entry ];
+    spacing: 12px;
+    padding: 14px 18px;
+    background-color: @surface;
+    border: 1px;
+    border-color: @surface1;
+    border-radius: 16px;
+}
+
+prompt, entry {
+    background-color: @transparent;
+}
+
+prompt {
+    text-color: @blue;
+}
+
+entry {
+    placeholder: "Search...";
+    placeholder-color: @subtext;
+    text-color: @text;
+}
+
+listview {
+    lines: 6;
+    columns: 1;
+    fixed-height: false;
+    scrollbar: false;
+    spacing: 10px;
+}
+
+element {
+    padding: 16px 18px;
+    border-radius: 16px;
+    background-color: @surface;
+    border: 1px;
+    border-color: @surface1;
+    text-color: @text;
+}
+
+element normal.normal,
+element alternate.normal {
+    background-color: @surface;
+    border: 1px;
+    border-color: @surface1;
+    text-color: @text;
+}
+
+element normal.active,
+element alternate.active {
+    background-color: @surface;
+    border: 1px;
+    border-color: @blue;
+    text-color: @blue;
+}
+
+element normal.urgent,
+element alternate.urgent {
+    background-color: @surface;
+    border: 1px;
+    border-color: @red;
+    text-color: @red;
+}
+
+element selected,
+element selected.normal,
+element selected.active {
+    background-color: @blue;
+    border: 1px;
+    border-color: @blue;
+    text-color: @dark;
+}
+
+element selected.urgent {
+    background-color: @red;
+    border: 1px;
+    border-color: @red;
+    text-color: @dark;
+}
+
+element-text {
+    background-color: @transparent;
+    text-color: inherit;
+    vertical-align: 0.5;
+}
+
+mode-switcher {
+    spacing: 10px;
+}
+
+button,
+button normal {
+    padding: 12px 16px;
+    border-radius: 14px;
+    background-color: @surface;
+    border: 1px;
+    border-color: @surface1;
+    text-color: @subtext;
+}
+
+button selected {
+    background-color: @blue;
+    border: 1px;
+    border-color: @blue;
+    text-color: @dark;
+}
+
+textbox {
+    padding: 12px 16px;
+    border-radius: 14px;
+    background-color: @surface;
+    text-color: @text;
+}
+"""
+
+PICOM_CONF = """# Lightweight picom v13 config for rounded corners on Termux:X11
+# Uses xrender for low-overhead stability on Mali; try "glx" for smoother anti-aliased corners.
+backend = "xrender";
+
+corner-radius = 18;
+shadow = false;
+fading = false;
+vsync = true;
+use-damage = false;
+
+rules: ({
+  match = "window_type = 'dock'    || "
+          "window_type = 'desktop' || "
+          "fullscreen";
+  corner-radius = 0;
+})
+"""
+
+XFCE4_TERMINAL_RC = """[Configuration]
+FontName=JetBrainsMono Nerd Font 19
+FontUseSystem=FALSE
+MiscMenubarDefault=FALSE
+MiscConfirmClose=FALSE
+MiscDefaultGeometry=110x34
+ScrollingLines=10000
+ColorForeground=#cdd6f4
+ColorBackground=#1e1e2e
+ColorCursor=#f5e0dc
+ColorPalette=#45475a;#f38ba8;#a6e3a1;#f9e2af;#89b4fa;#f5c2e7;#94e2d5;#bac2de;#585b70;#f38ba8;#a6e3a1;#f9e2af;#89b4fa;#f5c2e7;#94e2d5;#a6adc8
+"""
+
+XFCE4_TERMINAL_XML = """<?xml version="1.1" encoding="UTF-8"?>
+
+<channel name="xfce4-terminal" version="1.0">
+  <property name="color-foreground" type="string" value="#cdd6f4"/>
+  <property name="color-background" type="string" value="#1e1e2e"/>
+  <property name="color-cursor" type="string" value="#f5e0dc"/>
+  <property name="color-palette" type="string" value="#45475a;#f38ba8;#a6e3a1;#f9e2af;#89b4fa;#f5c2e7;#94e2d5;#bac2de;#585b70;#f38ba8;#a6e3a1;#f9e2af;#89b4fa;#f5c2e7;#94e2d5;#a6adc8"/>
+  <property name="font-name" type="string" value="JetBrainsMono Nerd Font 19"/>
+  <property name="font-use-system" type="bool" value="false"/>
+  <property name="misc-default-geometry" type="string" value="110x34"/>
+  <property name="misc-menubar-default" type="bool" value="false"/>
+  <property name="misc-confirm-close" type="bool" value="false"/>
+  <property name="scrolling-lines" type="uint" value="10000"/>
+</channel>
+"""
+
+START_X11_SH = """#!/data/data/com.termux/files/usr/bin/bash
+set -u
+
+PREFIX="${PREFIX:-/data/data/com.termux/files/usr}"
+export DISPLAY=":0"
+export XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-$PREFIX/tmp}"
+export TMPDIR="${TMPDIR:-$XDG_RUNTIME_DIR}"
+export XDG_CONFIG_HOME="${XDG_CONFIG_HOME:-$HOME/.config}"
+export BSPWM_SOCKET="$XDG_RUNTIME_DIR/bspwm_0_0-socket"
+export XCURSOR_THEME="TouchDot-Mocha"
+export XCURSOR_SIZE="32"
+
+VIRGL_PID=""
+cleanup() {
+  eww kill >/dev/null 2>&1 || true
+  pkill -x eww quickshell polybar fastcompmgr picom sxhkd bspwm termux-x11 2>/dev/null || true
+  [ -f "$TMPDIR/hide-cursor.pid" ] && kill "$(cat "$TMPDIR/hide-cursor.pid")" 2>/dev/null || true
+  [ -f "$TMPDIR/eww-watch.pid" ] && kill "$(cat "$TMPDIR/eww-watch.pid")" 2>/dev/null || true
+  [ -f "$TMPDIR/qs-watch.pid" ] && kill "$(cat "$TMPDIR/qs-watch.pid")" 2>/dev/null || true
+  [ -n "$VIRGL_PID" ] && kill "$VIRGL_PID" 2>/dev/null || true
+  rm -f "$XDG_RUNTIME_DIR/.virgl_test" "$BSPWM_SOCKET" "$XDG_RUNTIME_DIR/.X11-unix/X0" "$TMPDIR/hide-cursor.pid" "$TMPDIR/eww-watch.pid" "$TMPDIR/qs-watch.pid"
+}
+trap cleanup EXIT INT TERM
+
+# Clean up stale X11 / WM / VirGL processes from an earlier session
+eww kill >/dev/null 2>&1 || true
+[ -f "$TMPDIR/eww-watch.pid" ] && kill "$(cat "$TMPDIR/eww-watch.pid")" 2>/dev/null || true
+[ -f "$TMPDIR/qs-watch.pid" ] && kill "$(cat "$TMPDIR/qs-watch.pid")" 2>/dev/null || true
+rm -f "$TMPDIR/eww-watch.pid" "$TMPDIR/qs-watch.pid"
+pkill -x eww quickshell polybar fastcompmgr picom sxhkd bspwm termux-x11 virgl_test_serv 2>/dev/null || true
+[ -f "$TMPDIR/hide-cursor.pid" ] && kill "$(cat "$TMPDIR/hide-cursor.pid")" 2>/dev/null || true
+pkill -f '[v]irgl_test_server_android' 2>/dev/null || true
+pkill -f "com.termux.x11" 2>/dev/null || true
+rm -f "$XDG_RUNTIME_DIR/.virgl_test" "$BSPWM_SOCKET" "$XDG_RUNTIME_DIR/.X11-unix/X0"
+sleep 0.5
+
+# Hardware OpenGL ES -> Vulkan passthrough via ANGLE for Qt Quick / GL apps
+if command -v virgl_test_server_android >/dev/null 2>&1; then
+  virgl_test_server_android --multi-clients --angle-vulkan >/dev/null 2>&1 &
+  VIRGL_PID=$!
+  i=0
+  while [ "$i" -lt 20 ] && [ ! -S "$XDG_RUNTIME_DIR/.virgl_test" ]; do
+    i=$((i + 1))
+    sleep 0.05
+  done
+  export GALLIUM_DRIVER=virpipe
+fi
+
+if command -v pulseaudio >/dev/null 2>&1; then
+  pulseaudio --start --exit-idle-time=-1 2>/dev/null || true
+fi
+
+# Open the Termux:X11 Android activity
+am start --user 0 -n com.termux.x11/com.termux.x11.MainActivity >/dev/null 2>&1 || true
+
+# Launch X11 and start bspwm once :0 is ready
+if command -v dbus-launch >/dev/null 2>&1; then
+  termux-x11 :0 -xstartup "dbus-launch --exit-with-session bspwm"
+else
+  termux-x11 :0 -xstartup "bspwm"
+fi
+"""
+
+SWAY_CONFIG = """# Catppuccin Mocha Sway config for Termux Wayland (touch + 13" readable)
+set $mod Mod1
+xwayland enable
+
+font pango:JetBrainsMono Nerd Font 14
+
+gaps inner 12
+gaps outer 8
+default_border pixel 2
+default_floating_border pixel 2
+hide_edge_borders smart
+
+# Catppuccin Mocha borders
+client.focused          #89b4fa #1e1e2e #cdd6f4 #cba6f7 #89b4fa
+client.focused_inactive #45475a #1e1e2e #a6adc8 #45475a #45475a
+client.unfocused        #313244 #1e1e2e #a6adc8 #313244 #313244
+client.urgent           #f38ba8 #1e1e2e #cdd6f4 #f38ba8 #f38ba8
+
+# Terminal & Launchers
+bindsym $mod+Return exec foot
+bindsym Mod4+Return exec foot
+bindsym $mod+Shift+Return exec xfce4-terminal
+bindsym $mod+d exec rofi -show drun
+bindsym Mod4+d exec rofi -show drun
+bindsym $mod+Tab exec rofi -show window
+
+# Window Controls
+bindsym $mod+q kill
+bindsym $mod+Shift+q kill
+bindsym $mod+f fullscreen toggle
+bindsym $mod+Shift+space floating toggle
+bindsym $mod+space focus mode_toggle
+
+# Focus & Move
+bindsym $mod+h focus left
+bindsym $mod+j focus down
+bindsym $mod+k focus up
+bindsym $mod+l focus right
+bindsym $mod+Left focus left
+bindsym $mod+Down focus down
+bindsym $mod+Up focus up
+bindsym $mod+Right focus right
+
+bindsym $mod+Shift+h move left
+bindsym $mod+Shift+j move down
+bindsym $mod+Shift+k move up
+bindsym $mod+Shift+l move right
+
+# Layout
+bindsym $mod+t layout tabbed
+bindsym $mod+e layout toggle split
+bindsym $mod+w layout stacking
+
+# Workspaces 1-6
+bindsym $mod+1 workspace number 1
+bindsym $mod+2 workspace number 2
+bindsym $mod+3 workspace number 3
+bindsym $mod+4 workspace number 4
+bindsym $mod+5 workspace number 5
+bindsym $mod+6 workspace number 6
+
+bindsym $mod+Shift+1 move container to workspace number 1
+bindsym $mod+Shift+2 move container to workspace number 2
+bindsym $mod+Shift+3 move container to workspace number 3
+bindsym $mod+Shift+4 move container to workspace number 4
+bindsym $mod+Shift+5 move container to workspace number 5
+bindsym $mod+Shift+6 move container to workspace number 6
+
+# Reload / Exit
+bindsym $mod+Shift+r reload
+bindsym $mod+Shift+e exit
+
+# Wallpaper + Native Wayland Quickshell Dock/Topbar
+exec_always sh -c '[ -f "$HOME/.local/share/wallpapers/wallpaper.jpg" ] && pkill -x swaybg 2>/dev/null; [ -f "$HOME/.local/share/wallpapers/wallpaper.jpg" ] && swaybg -i "$HOME/.local/share/wallpapers/wallpaper.jpg" -m fill &'
+exec_always sh -c '"$HOME/.config/quickshell/launch-wayland.sh"'
+"""
+
+LABWC_RC_XML = """<?xml version="1.0"?>
+<labwc_config>
+  <core>
+    <gap>12</gap>
+  </core>
+  <placement>
+    <policy>center</policy>
+  </placement>
+  <desktops>
+    <popupTime>800</popupTime>
+    <names>
+      <name>1</name>
+      <name>2</name>
+      <name>3</name>
+      <name>4</name>
+      <name>5</name>
+      <name>6</name>
+    </names>
+  </desktops>
+  <theme>
+    <name>Catppuccin-Mocha</name>
+    <cornerRadius>16</cornerRadius>
+    <font name="JetBrainsMono Nerd Font" size="13" />
+  </theme>
+  <focus>
+    <followMouse>yes</followMouse>
+  </focus>
+  <keyboard>
+    <default />
+    <keybind key="A-Return">
+      <action name="Execute" command="foot" />
+    </keybind>
+    <keybind key="W-Return">
+      <action name="Execute" command="foot" />
+    </keybind>
+    <keybind key="A-d">
+      <action name="Execute" command="rofi -show drun" />
+    </keybind>
+    <keybind key="W-d">
+      <action name="Execute" command="rofi -show drun" />
+    </keybind>
+    <keybind key="A-Tab">
+      <action name="NextWindow" />
+    </keybind>
+    <keybind key="A-q">
+      <action name="Close" />
+    </keybind>
+    <keybind key="A-S-q">
+      <action name="Close" />
+    </keybind>
+    <keybind key="A-f">
+      <action name="ToggleFullscreen" />
+    </keybind>
+    <keybind key="A-m">
+      <action name="ToggleMaximize" />
+    </keybind>
+    <keybind key="A-1">
+      <action name="GoToDesktop" to="1" />
+    </keybind>
+    <keybind key="A-2">
+      <action name="GoToDesktop" to="2" />
+    </keybind>
+    <keybind key="A-3">
+      <action name="GoToDesktop" to="3" />
+    </keybind>
+    <keybind key="A-4">
+      <action name="GoToDesktop" to="4" />
+    </keybind>
+    <keybind key="A-5">
+      <action name="GoToDesktop" to="5" />
+    </keybind>
+    <keybind key="A-6">
+      <action name="GoToDesktop" to="6" />
+    </keybind>
+    <keybind key="A-S-1">
+      <action name="SendToDesktop" to="1" />
+    </keybind>
+    <keybind key="A-S-2">
+      <action name="SendToDesktop" to="2" />
+    </keybind>
+    <keybind key="A-S-3">
+      <action name="SendToDesktop" to="3" />
+    </keybind>
+    <keybind key="A-S-4">
+      <action name="SendToDesktop" to="4" />
+    </keybind>
+    <keybind key="A-S-5">
+      <action name="SendToDesktop" to="5" />
+    </keybind>
+    <keybind key="A-S-6">
+      <action name="SendToDesktop" to="6" />
+    </keybind>
+    <keybind key="A-S-r">
+      <action name="Reconfigure" />
+    </keybind>
+    <keybind key="A-S-e">
+      <action name="Exit" />
+    </keybind>
+  </keyboard>
+</labwc_config>
+"""
+
+LABWC_THEMERC = """border.width: 2
+padding.width: 6
+padding.height: 6
+window.active.title.bg.color: #1e1e2e
+window.active.label.text.color: #cdd6f4
+window.active.border.color: #89b4fa
+window.inactive.title.bg.color: #181825
+window.inactive.label.text.color: #a6adc8
+window.inactive.border.color: #313244
+window.active.button.unpressed.image.color: #cdd6f4
+window.inactive.button.unpressed.image.color: #a6adc8
+osd.bg.color: #1e1e2e
+osd.border.color: #45475a
+osd.border.width: 2
+osd.label.text.color: #cdd6f4
+"""
+
+LABWC_AUTOSTART = """#!/data/data/com.termux/files/usr/bin/sh
+if command -v swaybg >/dev/null 2>&1 && [ -f "$HOME/.local/share/wallpapers/wallpaper.jpg" ]; then
+  swaybg -i "$HOME/.local/share/wallpapers/wallpaper.jpg" -m fill >/dev/null 2>&1 &
+fi
+"${XDG_CONFIG_HOME:-$HOME/.config}/quickshell/launch-wayland.sh" &
+"""
+
+FOOT_INI = """[main]
+font=JetBrainsMono Nerd Font:size=19
+initial-window-size-chars=110x34
+pad=18x18 center-when-maximized-and-fullscreen
+initial-color-theme=dark
+
+[cursor]
+style=block
+
+[colors-dark]
+alpha=0.94
+foreground=cdd6f4
+background=1e1e2e
+cursor=1e1e2e f5e0dc
+regular0=45475a
+regular1=f38ba8
+regular2=a6e3a1
+regular3=f9e2af
+regular4=89b4fa
+regular5=f5c2e7
+regular6=94e2d5
+regular7=bac2de
+bright0=585b70
+bright1=f38ba8
+bright2=a6e3a1
+bright3=f9e2af
+bright4=89b4fa
+bright5=f5c2e7
+bright6=94e2d5
+bright7=a6adc8
+16=fab387
+17=f5e0dc
+selection-foreground=cdd6f4
+selection-background=45475a
+search-box-no-match=1e1e2e f38ba8
+search-box-match=cdd6f4 313244
+jump-labels=1e1e2e fab387
+urls=89b4fa
+
+[csd]
+preferred=server
+size=28
+color=1e1e2e
+border-width=2
+border-color=313244
+button-color=313244
+button-minimize-color=89b4fa
+button-maximize-color=a6e3a1
+button-close-color=f38ba8
+"""
+
+START_WAYLAND_SH = """#!/data/data/com.termux/files/usr/bin/bash
+set -u
+
+PREFIX="${PREFIX:-/data/data/com.termux/files/usr}"
+export DISPLAY="${DISPLAY:-:0}"
+export TERMUX_X11_DISPLAY="$DISPLAY"
+export XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-$PREFIX/tmp}"
+export TMPDIR="${TMPDIR:-$XDG_RUNTIME_DIR}"
+export XDG_CONFIG_HOME="${XDG_CONFIG_HOME:-$HOME/.config}"
+export XDG_SESSION_TYPE="wayland"
+export XCURSOR_THEME="TouchDot-Mocha"
+export XCURSOR_SIZE="32"
+export WLR_NO_HARDWARE_CURSORS="1"
+
+BACKEND="x11"
+WM="sway"
+FORCE_TGUI=0
+USER_RENDERER="${WLR_RENDERER:-}"
+for arg in "$@"; do
+  case "$arg" in
+    --tgui) BACKEND="tgui" ;;
+    --force-tgui) BACKEND="tgui"; FORCE_TGUI=1 ;;
+    --x11)  BACKEND="x11" ;;
+    --renderer=*) USER_RENDERER="${arg#--renderer=}" ;;
+    sway|labwc) WM="$arg" ;;
+    -h|--help)
+      echo "Usage: $(basename "$0") [sway|labwc] [--x11] [--renderer=pixman|gles2|vulkan]"
+      exit 0
+      ;;
+  esac
+done
+
+if [ "$BACKEND" = "tgui" ] && [ "$FORCE_TGUI" -ne 1 ]; then
+  echo "[-] Termux wlroots tgui backend is broken on this device (vulkan segfaults, gles2 fails, pixman inverts colors & screen)."
+  echo "[*] Use Termux:X11 Wayland instead: desktop-wayland sway   (or pass --force-tgui to override)"
+  exit 1
+fi
+
+export WLR_BACKENDS="$BACKEND"
+if [ -n "$USER_RENDERER" ]; then
+  export WLR_RENDERER="$USER_RENDERER"
+elif [ "$BACKEND" = "x11" ]; then
+  # termux-x11 lacks DRI3/dmabuf, so wlroots X11 backend uses pixman
+  export WLR_RENDERER="pixman"
+else
+  export WLR_RENDERER="pixman"
+fi
+
+cleanup() {
+  pkill -x quickshell swaybg sway labwc polybar eww sxhkd bspwm termux-x11 2>/dev/null || true
+  rm -f "$XDG_RUNTIME_DIR/.X11-unix/X0" "$XDG_RUNTIME_DIR/wayland-0" "$XDG_RUNTIME_DIR/wayland-0.lock"
+}
+trap cleanup EXIT INT TERM
+
+# Clean stale sessions before launching
+eww kill >/dev/null 2>&1 || true
+pkill -x quickshell swaybg sway labwc polybar eww fastcompmgr picom sxhkd bspwm termux-x11 2>/dev/null || true
+pkill -f "com.termux.x11" 2>/dev/null || true
+rm -f "$XDG_RUNTIME_DIR/.X11-unix/X0" "$XDG_RUNTIME_DIR/wayland-0" "$XDG_RUNTIME_DIR/wayland-0.lock"
+sleep 0.5
+
+if ! command -v "$WM" >/dev/null 2>&1; then
+  if [ "$WM" = "sway" ] && command -v labwc >/dev/null 2>&1; then
+    WM="labwc"
+  elif [ "$WM" = "labwc" ] && command -v sway >/dev/null 2>&1; then
+    WM="sway"
+  else
+    echo "[-] Neither sway nor labwc is installed"
+    exit 1
+  fi
+fi
+
+if command -v pulseaudio >/dev/null 2>&1; then
+  pulseaudio --start --exit-idle-time=-1 2>/dev/null || true
+fi
+
+if [ "$WM" = "labwc" ]; then
+  THEME_DIR="$HOME/.themes/Catppuccin-Mocha/openbox-3"
+  mkdir -p "$THEME_DIR"
+  cp -f "$XDG_CONFIG_HOME/labwc/themerc" "$THEME_DIR/themerc" 2>/dev/null || true
+  WM_CMD="$WM -C $XDG_CONFIG_HOME/labwc"
+else
+  WM_CMD="$WM -c $XDG_CONFIG_HOME/sway/config"
+fi
+
+if [ "$BACKEND" = "tgui" ]; then
+  am start --user 0 -n com.termux.gui/.GUIActivity >/dev/null 2>&1 || true
+  if command -v dbus-launch >/dev/null 2>&1; then
+    exec dbus-launch --exit-with-session $WM_CMD
+  else
+    exec $WM_CMD
+  fi
+fi
+
+# Nested Wayland on Termux:X11
+am start --user 0 -n com.termux.x11/com.termux.x11.MainActivity >/dev/null 2>&1 || true
+if command -v dbus-launch >/dev/null 2>&1; then
+  termux-x11 :0 -xstartup "dbus-launch --exit-with-session $WM_CMD"
+else
+  termux-x11 :0 -xstartup "$WM_CMD"
+fi
+"""
+
+
+WALLPAPER_URL = "https://raw.githubusercontent.com/Ahwxorg/Wallpapers/main/aenami/alena-aenami-eternity-1080px.jpg"
+
+XRESOURCES_CURSOR = """Xcursor.theme: TouchDot-Mocha
+Xcursor.size: 32
+"""
+
+TOUCHDOT_INDEX = """[Icon Theme]
+Name=TouchDot-Mocha
+Comment=iPadOS-style translucent Catppuccin Mocha touch-dot cursor
+Inherits=Adwaita
+"""
+
+DEFAULT_CURSOR_INDEX = """[Icon Theme]
+Inherits=TouchDot-Mocha
+"""
+
+
+def _png_chunk(tag: bytes, data: bytes) -> bytes:
+    """Return a formatted PNG chunk with length and CRC32."""
+    return struct.pack("!I", len(data)) + tag + data + struct.pack("!I", zlib.crc32(tag + data) & 0xFFFFFFFF)
+
+
+def _write_rgba_png(path: str, size: int, pixel_fn) -> None:
+    """Write a square RGBA PNG generated by pixel_fn(x, y, size) -> (r, g, b, a)."""
+    rows = bytearray()
+    for y in range(size):
+        rows.append(0)
+        for x in range(size):
+            r, g, b, a = pixel_fn(x, y, size)
+            rows.extend((r, g, b, a))
+    ihdr = struct.pack("!IIBBBBB", size, size, 8, 6, 0, 0, 0)
+    png = (
+        b"\x89PNG\r\n\x1a\n"
+        + _png_chunk(b"IHDR", ihdr)
+        + _png_chunk(b"IDAT", zlib.compress(bytes(rows), 9))
+        + _png_chunk(b"IEND", b"")
+    )
+    with open(path, "wb") as f:
+        f.write(png)
+
+
+def _smoothstep(edge0: float, edge1: float, x: float) -> float:
+    """Hermite smoothstep clamped to [0, 1]."""
+    t = max(0.0, min(1.0, (x - edge0) / (edge1 - edge0)))
+    return t * t * (3.0 - 2.0 * t)
+
+
+def _dot_pixel(fill_rgb: tuple[int, int, int], ring_rgb: tuple[int, int, int], fill_alpha: float):
+    """Build an anti-aliased frosted touch-dot pixel shader."""
+    fr, fg, fb = fill_rgb
+    rr, rg, rb = ring_rgb
+
+    def shade(x: int, y: int, size: int) -> tuple[int, int, int, int]:
+        half = (size - 1) / 2.0
+        dist = math.hypot(x - half, y - half)
+        r_outer = size * 0.36
+        ring_w = max(1.5, size * 0.05)
+        r_inner = r_outer - ring_w
+
+        halo = (1.0 - _smoothstep(r_outer - 0.5, r_outer + 2.2, dist)) * 0.35
+        ring = (1.0 - _smoothstep(r_outer - 0.8, r_outer + 0.8, dist)) * _smoothstep(r_inner - 0.8, r_inner + 0.6, dist)
+        fill = (1.0 - _smoothstep(r_inner - 0.6, r_inner + 0.6, dist)) * fill_alpha
+
+        # Composite shadow halo -> translucent fill -> crisp ring (non-premultiplied RGBA)
+        a_out = min(1.0, halo + fill * (1.0 - halo) + ring * (1.0 - halo) * (1.0 - fill))
+        if a_out <= 0.002:
+            return (0, 0, 0, 0)
+        r_out = (17 * halo * (1.0 - ring) * (1.0 - fill) + fr * fill * (1.0 - ring) + rr * ring) / max(0.001, halo + fill + ring)
+        g_out = (17 * halo * (1.0 - ring) * (1.0 - fill) + fg * fill * (1.0 - ring) + rg * ring) / max(0.001, halo + fill + ring)
+        b_out = (27 * halo * (1.0 - ring) * (1.0 - fill) + fb * fill * (1.0 - ring) + rb * ring) / max(0.001, halo + fill + ring)
+        return (
+            max(0, min(255, int(r_out))),
+            max(0, min(255, int(g_out))),
+            max(0, min(255, int(b_out))),
+            max(0, min(255, int(a_out * 255))),
+        )
+
+    return shade
+
+
+def _ibeam_pixel(x: int, y: int, size: int) -> tuple[int, int, int, int]:
+    """Rounded vertical pill I-beam for clean text selection on tablet."""
+    cx = (size - 1) / 2.0
+    dx = abs(x - cx)
+    bar_h = size * 0.30
+    dy = max(0.0, abs(y - cx) - bar_h)
+    dist = math.hypot(dx, dy)
+    half_w = max(1.2, size * 0.045)
+    core = 1.0 - _smoothstep(half_w - 0.6, half_w + 0.6, dist)
+    outline = (1.0 - _smoothstep(half_w + 0.6, half_w + 1.8, dist)) * 0.65
+    a = max(core * 0.92, outline)
+    if a <= 0.002:
+        return (0, 0, 0, 0)
+    mix = core / max(0.001, core + outline * (1.0 - core))
+    r = int(17 + (205 - 17) * mix)
+    g = int(17 + (214 - 17) * mix)
+    b = int(27 + (244 - 27) * mix)
+    return (r, g, b, max(0, min(255, int(a * 255))))
+
+
+def _install_touch_cursor_theme() -> None:
+    """Generate TouchDot-Mocha Xcursor theme in ~/.icons using xcursorgen."""
+    if not shutil.which("xcursorgen"):
+        print("[-] xcursorgen not found; skipping TouchDot-Mocha cursor build")
+        failures.append("building TouchDot-Mocha cursor theme")
+        return
+
+    theme_dir = os.path.expanduser("~/.icons/TouchDot-Mocha")
+    cursors_dir = os.path.join(theme_dir, "cursors")
+    default_dir = os.path.expanduser("~/.icons/default")
+    os.makedirs(cursors_dir, exist_ok=True)
+    os.makedirs(default_dir, exist_ok=True)
+
+    with open(os.path.join(theme_dir, "index.theme"), "w") as f:
+        f.write(TOUCHDOT_INDEX)
+    with open(os.path.join(default_dir, "index.theme"), "w") as f:
+        f.write(DEFAULT_CURSOR_INDEX)
+
+    shapes = {
+        "dot": _dot_pixel((205, 214, 244), (205, 214, 244), 0.38),
+        "hand": _dot_pixel((137, 180, 250), (137, 180, 250), 0.48),
+        "busy": _dot_pixel((203, 166, 247), (203, 166, 247), 0.45),
+        "ibeam": _ibeam_pixel,
+    }
+    aliases = {
+        "dot": [
+            "left_ptr", "default", "arrow", "top_left_arrow", "X_cursor",
+            "move", "fleur", "all-scroll", "all-resize", "dnd-move", "dnd-ask",
+            "copy", "alias", "context-menu", "cross", "crosshair", "cross_reverse",
+            "tcross", "cell", "diamond_cross", "help", "question_arrow",
+            "not-allowed", "no-drop", "zoom-in", "zoom-out",
+            "n-resize", "s-resize", "e-resize", "w-resize",
+            "ne-resize", "nw-resize", "se-resize", "sw-resize",
+            "ns-resize", "ew-resize", "nesw-resize", "nwse-resize",
+            "col-resize", "row-resize", "sb_h_double_arrow", "sb_v_double_arrow",
+            "bd_double_arrow", "fd_double_arrow",
+            "top_side", "bottom_side", "left_side", "right_side",
+            "top_left_corner", "top_right_corner", "bottom_left_corner", "bottom_right_corner",
+        ],
+        "hand": ["pointer", "hand1", "hand2", "grab", "grabbing"],
+        "ibeam": ["xterm", "text", "vertical-text"],
+        "busy": ["watch", "wait", "progress"],
+    }
+
+    with tempfile.TemporaryDirectory() as tmp:
+        for base, shader in shapes.items():
+            cfg_lines = []
+            for sz in (32, 48):
+                png_path = os.path.join(tmp, f"{base}_{sz}.png")
+                _write_rgba_png(png_path, sz, shader)
+                hot = sz // 2
+                cfg_lines.append(f"{sz} {hot} {hot} {png_path}\n")
+            cfg_path = os.path.join(tmp, f"{base}.cfg")
+            with open(cfg_path, "w") as f:
+                f.writelines(cfg_lines)
+            out_path = os.path.join(cursors_dir, base)
+            subprocess.run(["xcursorgen", cfg_path, out_path], check=True)
+            for name in aliases[base]:
+                link_path = os.path.join(cursors_dir, name)
+                if os.path.lexists(link_path):
+                    os.unlink(link_path)
+                os.symlink(base, link_path)
+
+    print("[+] built ~/.icons/TouchDot-Mocha cursor theme")
+
+
+def configure_x11() -> int:
+    """Write minimal bspwm, sxhkd, polybar, picom, rofi, xfce4-terminal configs and ~/start-x11.sh."""
+    wall_dir = os.path.expanduser("~/.local/share/wallpapers")
+    wall_path = os.path.join(wall_dir, "wallpaper.jpg")
+    if not os.path.exists(wall_path):
+        os.makedirs(wall_dir, exist_ok=True)
+        run(
+            f"curl -fsSL '{WALLPAPER_URL}' -o '{wall_path}.tmp' && mv '{wall_path}.tmp' '{wall_path}'",
+            "downloading wallpaper",
+        )
+
+    _install_touch_cursor_theme()
+
+    prefix_bin = os.path.join(os.environ.get("PREFIX", "/data/data/com.termux/files/usr"), "bin")
+    files = [
+        ("~/.Xresources", XRESOURCES_CURSOR, 0o644),
+        ("~/.config/bspwm/bspwmrc", BSPWMRC, 0o755),
+        ("~/.config/bspwm/hide-cursor.py", HIDE_CURSOR_PY, 0o755),
+        ("~/.config/sxhkd/sxhkdrc", SXHKDRC, 0o644),
+        ("~/.config/polybar/config.ini", POLYBAR_CONFIG, 0o644),
+        ("~/.config/polybar/battery.sh", POLYBAR_BATTERY_SH, 0o755),
+        ("~/.config/polybar/cpu.py", POLYBAR_CPU_PY, 0o755),
+        ("~/.config/polybar/launch.sh", POLYBAR_LAUNCH, 0o755),
+        ("~/.config/eww/eww.yuck", EWW_YUCK, 0o644),
+        ("~/.config/eww/eww.scss", EWW_SCSS, 0o644),
+        ("~/.config/eww/launch.sh", EWW_LAUNCH_SH, 0o755),
+        ("~/.config/eww/scripts/bspwm_state.py", EWW_BSPWM_STATE_PY, 0o755),
+        ("~/.config/eww/scripts/audio_state.sh", EWW_AUDIO_STATE_SH, 0o755),
+        ("~/.config/eww/scripts/toggle_window.sh", EWW_TOGGLE_WINDOW_SH, 0o755),
+        ("~/.config/eww/scripts/submenu_watch.py", EWW_SUBMENU_WATCH_PY, 0o755),
+        ("~/.config/quickshell/shell.qml", QUICKSHELL_QML, 0o644),
+        ("~/.config/quickshell/wayland.qml", QUICKSHELL_WAYLAND_QML, 0o644),
+        ("~/.config/quickshell/launch.sh", QUICKSHELL_LAUNCH, 0o755),
+        ("~/.config/quickshell/launch-wayland.sh", QUICKSHELL_WAYLAND_LAUNCH, 0o755),
+        ("~/.config/quickshell/scripts/submenu_watch.py", QUICKSHELL_SUBMENU_WATCH_PY, 0o755),
+        ("~/.config/quickshell/scripts/sys_diag.py", QUICKSHELL_SYS_DIAG_PY, 0o755),
+        ("~/.config/quickshell/scripts/wl_workspaces.py", QUICKSHELL_WL_WORKSPACES_PY, 0o755),
+        ("~/.config/sway/config", SWAY_CONFIG, 0o644),
+        ("~/.config/labwc/rc.xml", LABWC_RC_XML, 0o644),
+        ("~/.config/labwc/themerc", LABWC_THEMERC, 0o644),
+        ("~/.config/labwc/autostart", LABWC_AUTOSTART, 0o755),
+        ("~/.config/foot/foot.ini", FOOT_INI, 0o644),
+        ("~/.config/picom/picom.conf", PICOM_CONF, 0o644),
+        ("~/.config/rofi/config.rasi", ROFI_CONFIG, 0o644),
+        ("~/.config/xfce4/terminal/terminalrc", XFCE4_TERMINAL_RC, 0o644),
+        ("~/.config/xfce4/xfconf/xfce-perchannel-xml/xfce4-terminal.xml", XFCE4_TERMINAL_XML, 0o644),
+        ("~/start-x11.sh", START_X11_SH, 0o755),
+        ("~/start-wayland.sh", START_WAYLAND_SH, 0o755),
+        (os.path.join(prefix_bin, "desktop"), START_X11_SH, 0o755),
+        (os.path.join(prefix_bin, "desktop-wayland"), START_WAYLAND_SH, 0o755),
+    ]
+    for raw_path, content, mode in files:
+        path = os.path.expanduser(raw_path)
+        try:
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            with open(path, "w") as f:
+                f.write(content)
+            os.chmod(path, mode)
+            print(f"[+] wrote {raw_path}")
+        except OSError as e:
+            print(f"[-] writing {raw_path} failed: {e}")
+            failures.append(f"writing {raw_path}")
     return 0
 
 

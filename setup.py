@@ -4,6 +4,7 @@
 import os
 import shutil
 import subprocess
+import sys
 from time import sleep
 
 # Everything that failed gets collected here and printed at the end
@@ -56,11 +57,28 @@ def initialize_pkg():
     run("pkg install curl wget jp2a ncurses-utils -y", "installing installation apps (curl, wget, jp2a, ncurses-utils)")
 
 
+def _install_packages(packages: list[str]):
+    """Bulk-install apt packages, falling back to per-package pkg installs on failure."""
+    packages = list(dict.fromkeys(packages))  # dedupe, keep order
+    packages_str = " ".join(packages)
+
+    # pkg takes much longer than apt for bulk installs, so try apt first
+    try:
+        subprocess.run("apt install " + packages_str + " -y", check=True, shell=True)
+        return
+    except subprocess.CalledProcessError:
+        print("[-] apt install failed, falling back to installing one by one with pkg...")
+
+    # One bad package makes bulk install fail; install individually to isolate failures
+    for pkg in packages:
+        run(f"pkg install {pkg} -y", f"installing {pkg}")
+
+
 def install_required_apps():
     """Install core CLI, C/C++ toolchain, Neovim, and GitHub packages."""
     run("pkg install tur-repo -y", "installing tur-repo")
 
-    apps_to_be_installed = [
+    _install_packages([
         # Base / shell
         "fastfetch", "zip", "git", "zsh", "starship", "eza", "yazi", "zoxide",
         "bat", "glow", "tmux", "man", "manpages", "termux-api",
@@ -71,20 +89,35 @@ def install_required_apps():
         "dotnet-sdk-9.0", "nodejs", "ruff", "ripgrep", "fd", "fzf", "lazygit",
         # GitHub / Git
         "git", "git-delta", "openssh", "gh",
-    ]
-    apps_to_be_installed = list(dict.fromkeys(apps_to_be_installed))  # dedupe, keep order
-    apps_to_be_installed_str = " ".join(apps_to_be_installed)
+    ])
 
-    # pkg takes much longer than apt for bulk installs, so try apt first
-    try:
-        subprocess.run("apt install " + apps_to_be_installed_str + " -y", check=True, shell=True)
-        return
-    except subprocess.CalledProcessError:
-        print("[-] apt install failed, falling back to installing one by one with pkg...")
 
-    # One bad package makes bulk install fail; install individually to isolate failures
-    for app in apps_to_be_installed:
-        run(f"pkg install {app} -y", f"installing {app}")
+def install_x11() -> int:
+    """Enable x11-repo/tur-repo and install Termux X11, quickshell, bspwm, polybar, rofi, and sxhkd."""
+    run("pkg install x11-repo tur-repo -y", "installing x11-repo and tur-repo")
+    run(["pkg", "update", "-y"], "pkg update")
+    run(["pkg", "upgrade", "-y"], "pkg upgrade")
+    _install_packages([
+        "termux-x11-nightly",
+        "quickshell",
+        "eww",
+        "bspwm",
+        "polybar",
+        "rofi",
+        "sxhkd",
+        "fastcompmgr",
+        "sway",
+        "swaybg",
+        "labwc",
+        "foot",
+        "feh",
+        "xfce4-terminal",
+        "alacritty",
+        "virglrenderer-android",
+        "xorg-xcursorgen",
+        "xorg-xsetroot",
+    ])
+    return 0
 
 
 # --- Xmake & LSP Tooling -----------------------------------------------------
@@ -258,8 +291,8 @@ def clean_up():
 
 # --- Entry Point -------------------------------------------------------------
 
-def main() -> int:
-    """Run full Termux package and toolchain setup."""
+def setup_core() -> int:
+    """Run core Termux package, toolchain, xmake, and LSP setup."""
     initialize_pkg()
     run("python -m pip install rich colorama==0.4.6", "pip install rich/colorama")
 
@@ -274,8 +307,68 @@ def main() -> int:
     install_basedpyright()
     install_conan()
     clean_up()
+    return 0
+
+
+def dispatch(choices: tuple[str, ...]) -> int:
+    """Dispatch setup choices ('core', 'x11') from menu entries or CLI flags."""
+    handlers = {
+        "core": lambda: setup_core(),
+        "x11": lambda: install_x11(),
+    }
+    rc = 0
+    for choice in choices:
+        handler = handlers.get(choice.lower())
+        if handler is None:
+            print(f"[!] Invalid choice: {choice!r}")
+            rc = 1
+            continue
+        try:
+            result = handler()
+        except Exception as e:  # never let one step kill the rest
+            print(f"[-] {choice} failed: {e}")
+            failures.append(choice)
+            result = 1
+        if result != 0:
+            rc = result
+    return rc
+
+
+def main() -> int:
+    """Parse CLI flags or show the interactive setup menu."""
+    args = sys.argv[1:]
+    if args:
+        rc = dispatch(tuple(arg.lstrip("-") for arg in args))
+        print_summary()
+        return 1 if (failures or rc != 0) else 0
+
+    if not shutil.which("tput"):
+        run("pkg install ncurses-utils -y", "installing ncurses-utils")
+
+    try:
+        from simple_term_menu import TerminalMenu
+    except ImportError:
+        run("python -m pip install simple-term-menu==1.6.6", "pip install simple-term-menu")
+        try:
+            from simple_term_menu import TerminalMenu
+        except ImportError:
+            print("[-] simple-term-menu is missing. Run with flags instead: python setup.py --core --x11")
+            return 1
+
+    terminal_menu = TerminalMenu(
+        ["Core", "x11"],
+        multi_select=True,
+        show_multi_select_hint=True,
+        title="Select what to set up (use space to select, enter to confirm):",
+    )
+    menu_entry_indices = terminal_menu.show()
+
+    if not menu_entry_indices:
+        print("[!] No menu entry selected. Exiting.")
+        return 1
+    rc = dispatch(terminal_menu.chosen_menu_entries)
     print_summary()
-    return 1 if failures else 0
+    return 1 if (failures or rc != 0) else 0
 
 
 if __name__ == "__main__":
