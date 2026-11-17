@@ -6209,8 +6209,8 @@ void wlr_output_state_set_transform(void *state, int transform) {
     if (!real_fn) {
         real_fn = dlsym(RTLD_NEXT, "wlr_output_state_set_transform");
     }
-    if (transform == WL_OUTPUT_TRANSFORM_FLIPPED_180) {
-        transform = WL_OUTPUT_TRANSFORM_NORMAL;
+    if (transform == WL_OUTPUT_TRANSFORM_NORMAL) {
+        transform = WL_OUTPUT_TRANSFORM_FLIPPED_180;
     }
     if (real_fn) {
         real_fn(state, transform);
