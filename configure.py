@@ -6174,6 +6174,50 @@ button-maximize-color=a6e3a1
 button-close-color=f38ba8
 """
 
+TGUI_FIX_C = """#define _GNU_SOURCE
+#include <dlfcn.h>
+#include <stdint.h>
+#include <stdlib.h>
+
+#define DRM_FORMAT_XRGB8888 0x34325258u
+#define DRM_FORMAT_ARGB8888 0x34325241u
+#define DRM_FORMAT_ABGR8888 0x34324241u
+#define WL_OUTPUT_TRANSFORM_NORMAL 0
+#define WL_OUTPUT_TRANSFORM_FLIPPED_180 6
+
+__attribute__((constructor))
+static void _tgui_fix_init(void) {
+    /* Prevent child processes (quickshell, foot, rofi) from inheriting LD_PRELOAD */
+    unsetenv("LD_PRELOAD");
+}
+
+void wlr_output_state_set_render_format(void *state, uint32_t format) {
+    static void (*real_fn)(void *, uint32_t) = NULL;
+    if (!real_fn) {
+        real_fn = dlsym(RTLD_NEXT, "wlr_output_state_set_render_format");
+    }
+    if (format == DRM_FORMAT_XRGB8888 || format == DRM_FORMAT_ARGB8888) {
+        format = DRM_FORMAT_ABGR8888;
+    }
+    if (real_fn) {
+        real_fn(state, format);
+    }
+}
+
+void wlr_output_state_set_transform(void *state, int transform) {
+    static void (*real_fn)(void *, int) = NULL;
+    if (!real_fn) {
+        real_fn = dlsym(RTLD_NEXT, "wlr_output_state_set_transform");
+    }
+    if (transform == WL_OUTPUT_TRANSFORM_FLIPPED_180) {
+        transform = WL_OUTPUT_TRANSFORM_NORMAL;
+    }
+    if (real_fn) {
+        real_fn(state, transform);
+    }
+}
+"""
+
 START_WAYLAND_SH = """#!/data/data/com.termux/files/usr/bin/bash
 set -u
 
@@ -6190,35 +6234,25 @@ export WLR_NO_HARDWARE_CURSORS="1"
 
 BACKEND="x11"
 WM="sway"
-FORCE_TGUI=0
 USER_RENDERER="${WLR_RENDERER:-}"
 for arg in "$@"; do
   case "$arg" in
     --tgui) BACKEND="tgui" ;;
-    --force-tgui) BACKEND="tgui"; FORCE_TGUI=1 ;;
     --x11)  BACKEND="x11" ;;
     --renderer=*) USER_RENDERER="${arg#--renderer=}" ;;
     sway|labwc) WM="$arg" ;;
     -h|--help)
-      echo "Usage: $(basename "$0") [sway|labwc] [--x11] [--renderer=pixman|gles2|vulkan]"
+      echo "Usage: $(basename "$0") [sway|labwc] [--x11|--tgui] [--renderer=pixman|gles2|vulkan]"
       exit 0
       ;;
   esac
 done
 
-if [ "$BACKEND" = "tgui" ] && [ "$FORCE_TGUI" -ne 1 ]; then
-  echo "[-] Termux wlroots tgui backend is broken on this device (vulkan segfaults, gles2 fails, pixman inverts colors & screen)."
-  echo "[*] Use Termux:X11 Wayland instead: desktop-wayland sway   (or pass --force-tgui to override)"
-  exit 1
-fi
-
 export WLR_BACKENDS="$BACKEND"
 if [ -n "$USER_RENDERER" ]; then
   export WLR_RENDERER="$USER_RENDERER"
-elif [ "$BACKEND" = "x11" ]; then
-  # termux-x11 lacks DRI3/dmabuf, so wlroots X11 backend uses pixman
-  export WLR_RENDERER="pixman"
 else
+  # pixman works across both termux-x11 and tgui (tgui R/B + Y-flip fixed via libtgui_fix.so)
   export WLR_RENDERER="pixman"
 fi
 
@@ -6260,11 +6294,20 @@ else
 fi
 
 if [ "$BACKEND" = "tgui" ]; then
+  TGUI_SHIM="$HOME/.local/lib/libtgui_fix.so"
   am start --user 0 -n com.termux.gui/.GUIActivity >/dev/null 2>&1 || true
-  if command -v dbus-launch >/dev/null 2>&1; then
-    exec dbus-launch --exit-with-session $WM_CMD
+  if [ -f "$TGUI_SHIM" ]; then
+    if command -v dbus-launch >/dev/null 2>&1; then
+      exec dbus-launch --exit-with-session env LD_PRELOAD="$TGUI_SHIM" $WM_CMD
+    else
+      exec env LD_PRELOAD="$TGUI_SHIM" $WM_CMD
+    fi
   else
-    exec $WM_CMD
+    if command -v dbus-launch >/dev/null 2>&1; then
+      exec dbus-launch --exit-with-session $WM_CMD
+    else
+      exec $WM_CMD
+    fi
   fi
 fi
 
@@ -6444,6 +6487,27 @@ def _install_touch_cursor_theme() -> None:
     print("[+] built ~/.icons/TouchDot-Mocha cursor theme")
 
 
+def _build_tgui_fix_shim() -> None:
+    """Compile LD_PRELOAD shim fixing Termux:GUI ABGR8888 pixel format and FLIPPED_180 transform."""
+    if not shutil.which("clang"):
+        print("[-] clang not found; skipping libtgui_fix.so build")
+        failures.append("building libtgui_fix.so")
+        return
+
+    lib_dir = os.path.expanduser("~/.local/lib")
+    os.makedirs(lib_dir, exist_ok=True)
+    c_path = os.path.join(lib_dir, "tgui_fix.c")
+    so_path = os.path.join(lib_dir, "libtgui_fix.so")
+    try:
+        with open(c_path, "w") as f:
+            f.write(TGUI_FIX_C)
+        subprocess.run(["clang", "-shared", "-fPIC", "-O2", c_path, "-ldl", "-o", so_path], check=True)
+        print("[+] built ~/.local/lib/libtgui_fix.so")
+    except (OSError, subprocess.CalledProcessError) as e:
+        print(f"[-] building ~/.local/lib/libtgui_fix.so failed: {e}")
+        failures.append("building libtgui_fix.so")
+
+
 def configure_x11() -> int:
     """Write minimal bspwm, sxhkd, polybar, picom, rofi, xfce4-terminal configs and ~/start-x11.sh."""
     wall_dir = os.path.expanduser("~/.local/share/wallpapers")
@@ -6456,6 +6520,7 @@ def configure_x11() -> int:
         )
 
     _install_touch_cursor_theme()
+    _build_tgui_fix_shim()
 
     prefix_bin = os.path.join(os.environ.get("PREFIX", "/data/data/com.termux/files/usr"), "bin")
     files = [
