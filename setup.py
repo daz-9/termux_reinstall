@@ -81,7 +81,7 @@ def install_required_apps():
     _install_packages([
         # Base / shell
         "fastfetch", "zip", "git", "zsh", "starship", "eza", "yazi", "zoxide",
-        "bat", "glow", "tmux", "man", "manpages", "termux-api",
+        "bat", "glow", "tmux", "man", "manpages", "termux-api", "rish-shizuku",
         # C/C++ & Rust toolchains
         "clang", "lldb", "gdb", "make", "bear", "rust",
         # Neovim + pickers + native LSP runtimes

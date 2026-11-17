@@ -2893,6 +2893,559 @@ if __name__ == "__main__":
     sys.exit(main())
 """
 
+QUICKSHELL_ANDROID_STATUS_PY = """#!/data/data/com.termux/files/usr/bin/python3
+\"\"\"Probe Termux:API and Shizuku (rish / adbd) status and print one JSON object.\"\"\"
+
+import concurrent.futures
+import json
+import os
+import shutil
+import socket
+import subprocess
+import sys
+import time
+
+
+def _getprop(name: str) -> str:
+    try:
+        res = subprocess.run(["getprop", name], capture_output=True, text=True, timeout=0.8)
+        return res.stdout.strip()
+    except (OSError, subprocess.SubprocessError):
+        return ""
+
+
+def _tcp_open(host: str, port: int, timeout_s: float = 0.2) -> bool:
+    sock = socket.socket()
+    sock.settimeout(timeout_s)
+    try:
+        sock.connect((host, port))
+        return True
+    except OSError:
+        return False
+    finally:
+        try:
+            sock.close()
+        except OSError:
+            pass
+
+
+def _probe_termux_api() -> dict:
+    bat_bin = shutil.which("termux-battery-status")
+    ver = os.environ.get("TERMUX_API_VERSION", "")
+    if not bat_bin:
+        return {
+            "api_ok": False,
+            "api_state": "Missing",
+            "api_ver": ver,
+            "api_ms": 0,
+            "api_detail": "Install termux-api pkg",
+        }
+    t0 = time.monotonic()
+    try:
+        res = subprocess.run([bat_bin], capture_output=True, text=True, timeout=2.5)
+        ms = round((time.monotonic() - t0) * 1000)
+        if res.returncode == 0 and res.stdout.strip():
+            data = json.loads(res.stdout)
+            pct = data.get("percentage")
+            temp = data.get("temperature")
+            parts = []
+            if pct is not None:
+                parts.append(f"Bat {int(pct)}%")
+            if temp is not None:
+                parts.append(f"{float(temp):.1f}°C")
+            parts.append(f"{ms}ms")
+            return {
+                "api_ok": True,
+                "api_state": "Ready",
+                "api_ver": ver,
+                "api_ms": ms,
+                "api_detail": " · ".join(parts),
+            }
+        return {
+            "api_ok": False,
+            "api_state": "Offline",
+            "api_ver": ver,
+            "api_ms": ms,
+            "api_detail": "Open Termux:API app",
+        }
+    except subprocess.TimeoutExpired:
+        return {
+            "api_ok": False,
+            "api_state": "Timeout",
+            "api_ver": ver,
+            "api_ms": 2500,
+            "api_detail": "Bridge timed out (>2.5s)",
+        }
+    except (OSError, ValueError, TypeError, json.JSONDecodeError):
+        return {
+            "api_ok": False,
+            "api_state": "Offline",
+            "api_ver": ver,
+            "api_ms": 0,
+            "api_detail": "Bridge error",
+        }
+
+
+def _probe_shizuku() -> dict:
+    prefix = os.environ.get("PREFIX", "/data/data/com.termux/files/usr")
+    dex_path = os.path.join(prefix, "share", "rish-shizuku.dex")
+    adbd_svc = _getprop("init.svc.adbd") or "unknown"
+    tcp_prop = _getprop("service.adb.tcp.port")
+    adb_port = int(tcp_prop) if tcp_prop.isdigit() and int(tcp_prop) > 0 else 5555
+    adb_tcp_open = _tcp_open("127.0.0.1", adb_port)
+
+    if not os.path.exists(dex_path):
+        detail = f"adbd {adbd_svc}" + (f" · :{adb_port} open" if adb_tcp_open else "")
+        return {
+            "shizuku_ok": False,
+            "shizuku_state": "No rish",
+            "shizuku_ver": "",
+            "shizuku_uid": -1,
+            "shizuku_pid": 0,
+            "adb_tcp_open": adb_tcp_open,
+            "adb_port": adb_port,
+            "shizuku_detail": f"No rish · {detail}",
+            "api_ver_pkg": "",
+        }
+
+    # Android 14+ aborts app_process if the dex file is writable by owner.
+    try:
+        mode = os.stat(dex_path).st_mode & 0o777
+        if mode & 0o222:
+            os.chmod(dex_path, 0o400)
+    except OSError:
+        pass
+
+    env = os.environ.copy()
+    env.pop("LD_LIBRARY_PATH", None)
+    env.pop("LD_PRELOAD", None)
+    env["RISH_APPLICATION_ID"] = "com.termux"
+
+    probe_cmd = (
+        "echo UID:$(id -u); "
+        "ps -A -o PID,NAME 2>/dev/null | grep -m1 shizuku_server | sed 's/^/SHZ_PS:/'; "
+        "dumpsys package moe.shizuku.privileged.api 2>/dev/null | grep -m1 versionName= | sed 's/^/SHZ_VER:/'; "
+        "dumpsys package com.termux.api 2>/dev/null | grep -m1 versionName= | sed 's/^/API_VER:/'"
+    )
+    app_proc = "/system/bin/app_process"
+    if not os.path.exists(app_proc):
+        app_proc = shutil.which("app_process") or "app_process"
+
+    try:
+        res = subprocess.run(
+            [
+                app_proc,
+                f"-Djava.class.path={dex_path}",
+                "/system/bin",
+                "--nice-name=rish",
+                "rikka.shizuku.shell.ShizukuShellLoader",
+                "-c",
+                probe_cmd,
+            ],
+            env=env,
+            stdin=subprocess.DEVNULL,
+            capture_output=True,
+            text=True,
+            timeout=2.8,
+        )
+        out = (res.stdout or "") + "\\n" + (res.stderr or "")
+    except subprocess.TimeoutExpired:
+        detail = f"adbd {adbd_svc}" + (f" · :{adb_port}" if adb_tcp_open else "")
+        return {
+            "shizuku_ok": False,
+            "shizuku_state": "Stopped",
+            "shizuku_ver": "",
+            "shizuku_uid": -1,
+            "shizuku_pid": 0,
+            "adb_tcp_open": adb_tcp_open,
+            "adb_port": adb_port,
+            "shizuku_detail": f"Timed out · {detail}",
+            "api_ver_pkg": "",
+        }
+    except OSError as e:
+        return {
+            "shizuku_ok": False,
+            "shizuku_state": "Error",
+            "shizuku_ver": "",
+            "shizuku_uid": -1,
+            "shizuku_pid": 0,
+            "adb_tcp_open": adb_tcp_open,
+            "adb_port": adb_port,
+            "shizuku_detail": str(e)[:42],
+            "api_ver_pkg": "",
+        }
+
+    uid = -1
+    pid = 0
+    shizuku_ver = ""
+    api_ver_pkg = ""
+    for raw_line in out.splitlines():
+        line = raw_line.strip()
+        if line.startswith("UID:"):
+            val = line[4:].strip()
+            if val.isdigit():
+                uid = int(val)
+        elif line.startswith("SHZ_PS:") and "shizuku_server" in line:
+            toks = line[7:].strip().split()
+            if toks and toks[0].isdigit():
+                pid = int(toks[0])
+        elif line.startswith("SHZ_VER:") and "versionName=" in line:
+            shizuku_ver = line.split("versionName=", 1)[1].strip()
+        elif line.startswith("API_VER:") and "versionName=" in line:
+            api_ver_pkg = line.split("versionName=", 1)[1].strip()
+
+    if res.returncode == 0 and uid in (0, 2000):
+        mode_lbl = "Root" if uid == 0 else "ADB"
+        detail_parts = [f"UID {uid}"]
+        if pid > 0:
+            detail_parts.append(f"PID {pid}")
+        if adb_tcp_open:
+            detail_parts.append(f"TCP :{adb_port}")
+        return {
+            "shizuku_ok": True,
+            "shizuku_state": f"Active · {mode_lbl}",
+            "shizuku_ver": shizuku_ver,
+            "shizuku_uid": uid,
+            "shizuku_pid": pid,
+            "adb_tcp_open": adb_tcp_open,
+            "adb_port": adb_port,
+            "shizuku_detail": " · ".join(detail_parts),
+            "api_ver_pkg": api_ver_pkg,
+        }
+
+    low = out.lower()
+    if "permission" in low or "denied" in low or "unauthorized" in low:
+        state = "Denied"
+        detail = "Grant Termux in Shizuku"
+    else:
+        state = "Stopped"
+        detail = f"adbd {adbd_svc}" + (f" · :{adb_port} open" if adb_tcp_open else "")
+
+    return {
+        "shizuku_ok": False,
+        "shizuku_state": state,
+        "shizuku_ver": shizuku_ver,
+        "shizuku_uid": uid,
+        "shizuku_pid": pid,
+        "adb_tcp_open": adb_tcp_open,
+        "adb_port": adb_port,
+        "shizuku_detail": detail,
+        "api_ver_pkg": api_ver_pkg,
+    }
+
+
+def main() -> int:
+    with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:
+        f_api = pool.submit(_probe_termux_api)
+        f_shz = pool.submit(_probe_shizuku)
+        api = f_api.result()
+        shz = f_shz.result()
+    if shz.get("api_ver_pkg") and not api.get("api_ver"):
+        api["api_ver"] = shz["api_ver_pkg"]
+    shz.pop("api_ver_pkg", None)
+    print(json.dumps({**api, **shz}), flush=True)
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
+"""
+
+_QS_ANDROID_STATUS_PROPS = """    property bool androidProbing: false
+    property bool termuxApiOk: false
+    property string termuxApiState: "Checking..."
+    property string termuxApiVer: ""
+    property string termuxApiDetail: "Probing Termux:API..."
+    property bool shizukuOk: false
+    property string shizukuState: "Checking..."
+    property string shizukuVer: ""
+    property string shizukuDetail: "Probing Shizuku..."
+"""
+
+_QS_ANDROID_STATUS_FN = """    function refreshAndroidStatus() {
+        if (!androidStatusProc.running) {
+            root.androidProbing = true;
+            androidStatusProc.running = true;
+        }
+    }
+"""
+
+_QS_ANDROID_STATUS_PROCS = """    Process {
+        id: androidStatusProc
+        command: ["python3", Quickshell.env("HOME") + "/.config/quickshell/scripts/android_status.py"]
+        running: false
+        onRunningChanged: {
+            if (!running) root.androidProbing = false;
+        }
+        stdout: StdioCollector {
+            onStreamFinished: {
+                root.androidProbing = false;
+                try {
+                    const d = JSON.parse((this.text || "").trim() || "{}");
+                    if (d.api_ok !== undefined) root.termuxApiOk = Boolean(d.api_ok);
+                    if (d.api_state !== undefined) root.termuxApiState = String(d.api_state);
+                    if (d.api_ver !== undefined) root.termuxApiVer = String(d.api_ver);
+                    if (d.api_detail !== undefined) root.termuxApiDetail = String(d.api_detail);
+                    if (d.shizuku_ok !== undefined) root.shizukuOk = Boolean(d.shizuku_ok);
+                    if (d.shizuku_state !== undefined) root.shizukuState = String(d.shizuku_state);
+                    if (d.shizuku_ver !== undefined) root.shizukuVer = String(d.shizuku_ver);
+                    if (d.shizuku_detail !== undefined) root.shizukuDetail = String(d.shizuku_detail);
+                } catch (e) {}
+            }
+        }
+    }
+
+    Timer {
+        interval: 1200
+        running: true
+        repeat: false
+        onTriggered: root.refreshAndroidStatus()
+    }
+
+    Timer {
+        interval: 15000
+        running: root.widgetsOpen
+        repeat: true
+        onTriggered: root.refreshAndroidStatus()
+    }
+
+    Timer {
+        id: androidDelayTimer
+        interval: 700
+        repeat: false
+        onTriggered: root.refreshAndroidStatus()
+    }
+"""
+
+_QS_ANDROID_STATUS_CARD = """                        // Termux:API & Shizuku Status Card
+                        Rectangle {
+                            Layout.fillWidth: true
+                            implicitHeight: androidStatusCol.implicitHeight + 40
+                            radius: 20
+                            color: root.colSurface
+                            border.color: root.colSurface1
+                            border.width: 1
+
+                            Column {
+                                id: androidStatusCol
+                                anchors.fill: parent
+                                anchors.leftMargin: 24
+                                anchors.rightMargin: 24
+                                anchors.topMargin: 20
+                                anchors.bottomMargin: 20
+                                spacing: 14
+
+                                RowLayout {
+                                    width: parent.width
+                                    Row {
+                                        spacing: 12
+                                        Text {
+                                            anchors.verticalCenter: parent.verticalCenter
+                                            text: "\uf17b"
+                                            color: (root.termuxApiOk && root.shizukuOk) ? root.colGreen : ((root.termuxApiOk || root.shizukuOk) ? root.colPeach : root.colRed)
+                                            font.family: root.uiFont
+                                            font.pixelSize: 28
+                                        }
+                                        Text {
+                                            anchors.verticalCenter: parent.verticalCenter
+                                            text: "Termux:API & Shizuku"
+                                            color: root.colText
+                                            font.family: root.uiFont
+                                            font.pixelSize: 24
+                                            font.bold: true
+                                        }
+                                    }
+                                    Item { Layout.fillWidth: true }
+                                    Rectangle {
+                                        implicitWidth: refreshRow.implicitWidth + 24
+                                        height: 40
+                                        radius: 12
+                                        color: refreshBtnArea.pressed ? root.colBlue : root.colPopupBase
+                                        border.color: root.colSurface1
+                                        border.width: 1
+                                        Row {
+                                            id: refreshRow
+                                            anchors.centerIn: parent
+                                            spacing: 8
+                                            Text {
+                                                anchors.verticalCenter: parent.verticalCenter
+                                                text: "\uf021"
+                                                color: refreshBtnArea.pressed ? root.colDark : root.colBlue
+                                                font.family: root.uiFont
+                                                font.pixelSize: 18
+                                            }
+                                            Text {
+                                                anchors.verticalCenter: parent.verticalCenter
+                                                text: root.androidProbing ? "Checking" : "Refresh"
+                                                color: refreshBtnArea.pressed ? root.colDark : root.colSubtext
+                                                font.family: root.uiFont
+                                                font.pixelSize: 18
+                                                font.bold: true
+                                            }
+                                        }
+                                        MouseArea {
+                                            id: refreshBtnArea
+                                            anchors.fill: parent
+                                            onClicked: root.refreshAndroidStatus()
+                                        }
+                                    }
+                                }
+
+                                RowLayout {
+                                    width: parent.width
+                                    spacing: 14
+
+                                    // Termux:API Tile
+                                    Rectangle {
+                                        Layout.fillWidth: true
+                                        implicitHeight: apiTileCol.implicitHeight + 32
+                                        radius: 16
+                                        color: apiTileArea.pressed ? root.colSurface1 : root.colPopupBase
+                                        border.color: root.termuxApiOk ? root.colGreen : root.colSurface1
+                                        border.width: 1
+
+                                        Column {
+                                            id: apiTileCol
+                                            anchors.fill: parent
+                                            anchors.margins: 16
+                                            spacing: 6
+
+                                            RowLayout {
+                                                width: parent.width
+                                                Row {
+                                                    spacing: 10
+                                                    Rectangle {
+                                                        anchors.verticalCenter: parent.verticalCenter
+                                                        width: 12
+                                                        height: 12
+                                                        radius: 6
+                                                        color: root.termuxApiOk ? root.colGreen : (root.termuxApiState === "Missing" ? root.colRed : root.colPeach)
+                                                    }
+                                                    Text {
+                                                        anchors.verticalCenter: parent.verticalCenter
+                                                        text: "Termux:API"
+                                                        color: root.colText
+                                                        font.family: root.uiFont
+                                                        font.pixelSize: 21
+                                                        font.bold: true
+                                                    }
+                                                }
+                                                Item { Layout.fillWidth: true }
+                                                Text {
+                                                    visible: root.termuxApiVer.length > 0
+                                                    text: "v" + root.termuxApiVer
+                                                    color: root.colSubtext
+                                                    font.family: root.uiFont
+                                                    font.pixelSize: 17
+                                                }
+                                            }
+
+                                            Text {
+                                                width: parent.width
+                                                elide: Text.ElideRight
+                                                text: root.termuxApiState
+                                                color: root.termuxApiOk ? root.colGreen : (root.termuxApiState === "Missing" ? root.colRed : root.colPeach)
+                                                font.family: root.uiFont
+                                                font.pixelSize: 23
+                                                font.bold: true
+                                            }
+
+                                            Text {
+                                                width: parent.width
+                                                elide: Text.ElideRight
+                                                text: root.termuxApiDetail
+                                                color: root.colSubtext
+                                                font.family: root.uiFont
+                                                font.pixelSize: 18
+                                            }
+                                        }
+
+                                        MouseArea {
+                                            id: apiTileArea
+                                            anchors.fill: parent
+                                            onClicked: {
+                                                root.runCmd(["sh", "-c", "termux-api-start >/dev/null 2>&1"]);
+                                                androidDelayTimer.restart();
+                                            }
+                                        }
+                                    }
+
+                                    // Shizuku Tile
+                                    Rectangle {
+                                        Layout.fillWidth: true
+                                        implicitHeight: shzTileCol.implicitHeight + 32
+                                        radius: 16
+                                        color: shzTileArea.pressed ? root.colSurface1 : root.colPopupBase
+                                        border.color: root.shizukuOk ? root.colGreen : root.colSurface1
+                                        border.width: 1
+
+                                        Column {
+                                            id: shzTileCol
+                                            anchors.fill: parent
+                                            anchors.margins: 16
+                                            spacing: 6
+
+                                            RowLayout {
+                                                width: parent.width
+                                                Row {
+                                                    spacing: 10
+                                                    Rectangle {
+                                                        anchors.verticalCenter: parent.verticalCenter
+                                                        width: 12
+                                                        height: 12
+                                                        radius: 6
+                                                        color: root.shizukuOk ? root.colGreen : (root.shizukuState === "No rish" ? root.colRed : root.colPeach)
+                                                    }
+                                                    Text {
+                                                        anchors.verticalCenter: parent.verticalCenter
+                                                        text: "Shizuku"
+                                                        color: root.colText
+                                                        font.family: root.uiFont
+                                                        font.pixelSize: 21
+                                                        font.bold: true
+                                                    }
+                                                }
+                                                Item { Layout.fillWidth: true }
+                                                Text {
+                                                    visible: root.shizukuVer.length > 0
+                                                    text: "v" + root.shizukuVer
+                                                    color: root.colSubtext
+                                                    font.family: root.uiFont
+                                                    font.pixelSize: 17
+                                                }
+                                            }
+
+                                            Text {
+                                                width: parent.width
+                                                elide: Text.ElideRight
+                                                text: root.shizukuState
+                                                color: root.shizukuOk ? root.colGreen : (root.shizukuState === "No rish" ? root.colRed : root.colPeach)
+                                                font.family: root.uiFont
+                                                font.pixelSize: 23
+                                                font.bold: true
+                                            }
+
+                                            Text {
+                                                width: parent.width
+                                                elide: Text.ElideRight
+                                                text: root.shizukuDetail
+                                                color: root.colSubtext
+                                                font.family: root.uiFont
+                                                font.pixelSize: 18
+                                            }
+                                        }
+
+                                        MouseArea {
+                                            id: shzTileArea
+                                            anchors.fill: parent
+                                            onClicked: root.refreshAndroidStatus()
+                                        }
+                                    }
+                                }
+                            }
+                        }
+"""
+
 QUICKSHELL_QML = """import Quickshell
 import Quickshell.Io
 import QtQuick
@@ -2917,7 +3470,7 @@ ShellRoot {
     property bool sessionActive: false
     property bool widgetsOpen: false
     property bool widgetsActive: false
-
+__ANDROID_STATUS_PROPS__
     readonly property color colBase: "#e61e1e2e"
     readonly property color colPopupBase: "#f21e1e2e"
     readonly property color colSurface: "#313244"
@@ -2952,6 +3505,7 @@ ShellRoot {
         }
     }
 
+__ANDROID_STATUS_FN__
     function toggleWidgets() {
         if (root.widgetsOpen) {
             closeWidgets();
@@ -2960,6 +3514,7 @@ ShellRoot {
             widgetsCloseTimer.stop();
             root.widgetsActive = true;
             root.widgetsOpen = true;
+            root.refreshAndroidStatus();
             syncWatcher();
         }
     }
@@ -3109,6 +3664,7 @@ ShellRoot {
         }
     }
 
+__ANDROID_STATUS_PROCS__
     Timer {
         interval: 4000
         running: true
@@ -3615,6 +4171,7 @@ ShellRoot {
                             }
                         }
 
+__ANDROID_STATUS_CARD__
                         // Spotify Card Space (Mockup)
                         Rectangle {
                             Layout.fillWidth: true
@@ -4052,7 +4609,7 @@ ShellRoot {
     property bool sessionActive: false
     property bool widgetsOpen: false
     property bool widgetsActive: false
-
+__ANDROID_STATUS_PROPS__
     readonly property color colBase: "#e61e1e2e"
     readonly property color colPopupBase: "#f21e1e2e"
     readonly property color colSurface: "#313244"
@@ -4096,6 +4653,7 @@ ShellRoot {
         }
     }
 
+__ANDROID_STATUS_FN__
     function findFocusedTitle(node) {
         if (!node) return "";
         if (node.focused && node.name && node.type !== "workspace" && node.type !== "output" && node.type !== "root") {
@@ -4117,6 +4675,7 @@ ShellRoot {
             widgetsCloseTimer.stop();
             root.widgetsActive = true;
             root.widgetsOpen = true;
+            root.refreshAndroidStatus();
         }
     }
 
@@ -4278,6 +4837,7 @@ ShellRoot {
         }
     }
 
+__ANDROID_STATUS_PROCS__
     Timer {
         interval: 1000
         running: true
@@ -5127,6 +5687,7 @@ ShellRoot {
                             }
                         }
 
+__ANDROID_STATUS_CARD__
                         Rectangle {
                             Layout.fillWidth: true
                             implicitHeight: spotifyCol.implicitHeight + 44
@@ -6522,7 +7083,25 @@ def configure_x11() -> int:
     _install_touch_cursor_theme()
     _build_tgui_fix_shim()
 
-    prefix_bin = os.path.join(os.environ.get("PREFIX", "/data/data/com.termux/files/usr"), "bin")
+    prefix = os.environ.get("PREFIX", "/data/data/com.termux/files/usr")
+    prefix_bin = os.path.join(prefix, "bin")
+    rish_dex = os.path.join(prefix, "share", "rish-shizuku.dex")
+    if os.path.exists(rish_dex):
+        try:
+            if (os.stat(rish_dex).st_mode & 0o777) & 0o222:
+                os.chmod(rish_dex, 0o400)
+                print("[+] set read-only 0400 on rish-shizuku.dex")
+        except OSError:
+            pass
+
+    def _render_qs(tpl: str) -> str:
+        return (
+            tpl.replace("__ANDROID_STATUS_PROPS__", _QS_ANDROID_STATUS_PROPS)
+            .replace("__ANDROID_STATUS_FN__", _QS_ANDROID_STATUS_FN)
+            .replace("__ANDROID_STATUS_PROCS__", _QS_ANDROID_STATUS_PROCS)
+            .replace("__ANDROID_STATUS_CARD__", _QS_ANDROID_STATUS_CARD)
+        )
+
     files = [
         ("~/.Xresources", XRESOURCES_CURSOR, 0o644),
         ("~/.config/bspwm/bspwmrc", BSPWMRC, 0o755),
@@ -6539,13 +7118,14 @@ def configure_x11() -> int:
         ("~/.config/eww/scripts/audio_state.sh", EWW_AUDIO_STATE_SH, 0o755),
         ("~/.config/eww/scripts/toggle_window.sh", EWW_TOGGLE_WINDOW_SH, 0o755),
         ("~/.config/eww/scripts/submenu_watch.py", EWW_SUBMENU_WATCH_PY, 0o755),
-        ("~/.config/quickshell/shell.qml", QUICKSHELL_QML, 0o644),
-        ("~/.config/quickshell/wayland.qml", QUICKSHELL_WAYLAND_QML, 0o644),
+        ("~/.config/quickshell/shell.qml", _render_qs(QUICKSHELL_QML), 0o644),
+        ("~/.config/quickshell/wayland.qml", _render_qs(QUICKSHELL_WAYLAND_QML), 0o644),
         ("~/.config/quickshell/launch.sh", QUICKSHELL_LAUNCH, 0o755),
         ("~/.config/quickshell/launch-wayland.sh", QUICKSHELL_WAYLAND_LAUNCH, 0o755),
         ("~/.config/quickshell/scripts/submenu_watch.py", QUICKSHELL_SUBMENU_WATCH_PY, 0o755),
         ("~/.config/quickshell/scripts/sys_diag.py", QUICKSHELL_SYS_DIAG_PY, 0o755),
         ("~/.config/quickshell/scripts/wl_workspaces.py", QUICKSHELL_WL_WORKSPACES_PY, 0o755),
+        ("~/.config/quickshell/scripts/android_status.py", QUICKSHELL_ANDROID_STATUS_PY, 0o755),
         ("~/.config/sway/config", SWAY_CONFIG, 0o644),
         ("~/.config/labwc/rc.xml", LABWC_RC_XML, 0o644),
         ("~/.config/labwc/themerc", LABWC_THEMERC, 0o644),
