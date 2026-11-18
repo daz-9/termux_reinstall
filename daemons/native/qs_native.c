@@ -1163,7 +1163,7 @@ static void parse_description(const char *desc, char *title, size_t tcap,
 static void emit_media_json(bool available, bool playing, const char *state, const char *pkg,
                             const char *app, const char *tag, const char *title,
                             const char *artist, const char *album, int64_t pos_sec, const char *pos_text) {
-    printf("{\"available\":%s,\"playing\":%s,\"state\":",
+    printf("{\"kind\":\"media\",\"available\":%s,\"playing\":%s,\"state\":",
            available ? "true" : "false", playing ? "true" : "false");
     json_write_str(stdout, state);
     fputs(",\"package\":", stdout); json_write_str(stdout, pkg);
@@ -1377,9 +1377,132 @@ static void dispatch_media_action(RishPipe *rp, const char *act, const char *was
     query_and_emit_media(rp);
 }
 
+static void emit_focus_json(bool available, int zen, int notif_count, const char *label) {
+    printf("{\"kind\":\"focus\",\"available\":%s,\"zen\":%d,\"dnd\":%s,\"notif_count\":%d,\"label\":",
+           available ? "true" : "false", zen, zen > 0 ? "true" : "false", notif_count);
+    json_write_str(stdout, label);
+    fputs("}\n", stdout);
+    fflush(stdout);
+}
+
+static const char *zen_label_for(int zen) {
+    if (zen == 1) return "Priority Only";
+    if (zen == 2) return "Total Silence";
+    if (zen == 3) return "Alarms Only";
+    return "Off";
+}
+
+static int query_zen_raw(RishPipe *rp, int *zen_out, int *notif_out) {
+    char *raw = NULL;
+    if (!rish_exec_framed(rp, "echo ZEN:$(settings get global zen_mode 2>/dev/null); echo NOTIFS:$(cmd notification list 2>/dev/null | grep -c '|')", &raw, 2500)) {
+        return -1;
+    }
+    int zen = 0, notifs = 0;
+    char *line = raw;
+    while (line && *line) {
+        char *nl = strchr(line, '\n');
+        if (nl) *nl = '\0';
+        if (strncmp(line, "ZEN:", 4) == 0) {
+            zen = atoi(line + 4);
+        } else if (strncmp(line, "NOTIFS:", 7) == 0) {
+            notifs = atoi(line + 7);
+        }
+        line = nl ? (nl + 1) : NULL;
+    }
+    free(raw);
+    if (zen_out) *zen_out = zen;
+    if (notif_out) *notif_out = notifs;
+    return 0;
+}
+
+static void query_and_emit_focus(RishPipe *rp) {
+    int zen = 0, notifs = 0;
+    if (query_zen_raw(rp, &zen, &notifs) != 0) {
+        emit_focus_json(false, 0, 0, "Shizuku Off");
+        return;
+    }
+    emit_focus_json(true, zen, notifs, zen_label_for(zen));
+}
+
+static void toggle_focus(RishPipe *rp) {
+    int zen = 0, notifs = 0;
+    if (query_zen_raw(rp, &zen, &notifs) != 0) {
+        emit_focus_json(false, 0, 0, "Shizuku Off");
+        return;
+    }
+    const char *cmd = (zen == 0)
+        ? "cmd notification set_dnd priority >/dev/null 2>&1"
+        : "cmd notification set_dnd off >/dev/null 2>&1";
+    char *ignored = NULL;
+    if (rish_exec_framed(rp, cmd, &ignored, 2500)) free(ignored);
+    sleep_check_ms(120);
+    query_and_emit_focus(rp);
+}
+
+static void query_and_emit_calendar(RishPipe *rp, int64_t start_ms, int64_t end_ms) {
+    if (start_ms <= 0 || end_ms <= start_ms) {
+        int64_t now_s = (int64_t)time(NULL);
+        start_ms = (now_s - 14LL * 86400LL) * 1000LL;
+        end_ms = (now_s + 90LL * 86400LL) * 1000LL;
+    }
+
+    char cmd[320];
+    snprintf(cmd, sizeof(cmd),
+             "content query --uri \"content://com.android.calendar/instances/when/%lld/%lld\" "
+             "--projection title:begin:end:allDay:calendar_id --sort \"begin ASC\" 2>/dev/null",
+             (long long)start_ms, (long long)end_ms);
+
+    char *raw = NULL;
+    if (!rish_exec_framed(rp, cmd, &raw, 3000)) {
+        printf("{\"kind\":\"calendar\",\"ok\":false,\"start_ms\":%lld,\"end_ms\":%lld,\"events\":[]}\n",
+               (long long)start_ms, (long long)end_ms);
+        fflush(stdout);
+        return;
+    }
+
+    printf("{\"kind\":\"calendar\",\"ok\":true,\"start_ms\":%lld,\"end_ms\":%lld,\"events\":[",
+           (long long)start_ms, (long long)end_ms);
+
+    int count = 0;
+    char *line = raw;
+    while (line && *line && count < 96) {
+        char *nl = strchr(line, '\n');
+        if (nl) *nl = '\0';
+        size_t ll = strlen(line);
+        while (ll > 0 && (line[ll - 1] == '\r' || line[ll - 1] == ' ')) line[--ll] = '\0';
+
+        char *tp = strstr(line, "title=");
+        char *cp = strstr(line, ", calendar_id=");
+        char *ap = cp ? strstr(line, ", allDay=") : NULL;
+        char *ep = ap ? strstr(line, ", end=") : NULL;
+        char *bp = ep ? strstr(line, ", begin=") : NULL;
+
+        if (tp && bp && ep && ap && cp && tp < bp && bp < ep && ep < ap && ap < cp) {
+            *bp = '\0';
+            const char *title = tp + 6;
+            int64_t begin_ms = strtoll(bp + 8, NULL, 10);
+            int64_t ev_end_ms = strncmp(ep + 6, "NULL", 4) == 0 ? 0 : strtoll(ep + 6, NULL, 10);
+            int all_day = atoi(ap + 9);
+            int cal_id = atoi(cp + 14);
+
+            printf("%s{\"title\":", count > 0 ? "," : "");
+            json_write_str(stdout, title);
+            printf(",\"begin_ms\":%lld,\"end_ms\":%lld,\"all_day\":%s,\"cal_id\":%d}",
+                   (long long)begin_ms, (long long)ev_end_ms, all_day ? "true" : "false", cal_id);
+            count++;
+        }
+        line = nl ? (nl + 1) : NULL;
+    }
+    fputs("]}\n", stdout);
+    fflush(stdout);
+    free(raw);
+}
+
 static int cmd_media_stream(void) {
     RishPipe rp = { .pid = -1, .to_fd = -1, .from_fd = -1, .seq = 0 };
     query_and_emit_media(&rp);
+    query_and_emit_focus(&rp);
+    query_and_emit_calendar(&rp, 0, 0);
 
     char in_buf[1024];
     size_t in_len = 0;
@@ -1410,6 +1533,21 @@ static int cmd_media_stream(void) {
                 while (l > 0 && (cur[l - 1] == '\r' || cur[l - 1] == ' ')) cur[--l] = '\0';
                 if (strcmp(cur, "status") == 0) {
                     query_and_emit_media(&rp);
+                } else if (strcmp(cur, "focus-status") == 0) {
+                    query_and_emit_focus(&rp);
+                } else if (strcmp(cur, "focus-toggle") == 0) {
+                    toggle_focus(&rp);
+                } else if (strcmp(cur, "calendar") == 0 || strncmp(cur, "calendar\t", 9) == 0) {
+                    int64_t s_ms = 0, e_ms = 0;
+                    if (cur[8] == '\t') {
+                        char *t2 = strchr(cur + 9, '\t');
+                        if (t2) {
+                            *t2++ = '\0';
+                            s_ms = strtoll(cur + 9, NULL, 10);
+                            e_ms = strtoll(t2, NULL, 10);
+                        }
+                    }
+                    query_and_emit_calendar(&rp, s_ms, e_ms);
                 } else if (*cur) {
                     char *t1 = strchr(cur, '\t');
                     char *t2 = t1 ? strchr(t1 + 1, '\t') : NULL;
@@ -1436,10 +1574,33 @@ static int cmd_media_status(void) {
     return 0;
 }
 
+static int cmd_focus_status(void) {
+    RishPipe rp = { .pid = -1, .to_fd = -1, .from_fd = -1, .seq = 0 };
+    query_and_emit_focus(&rp);
+    rish_close(&rp);
+    return 0;
+}
+
+static int cmd_focus_toggle(void) {
+    RishPipe rp = { .pid = -1, .to_fd = -1, .from_fd = -1, .seq = 0 };
+    toggle_focus(&rp);
+    rish_close(&rp);
+    return 0;
+}
+
+static int cmd_calendar(int argc, char **argv) {
+    int64_t s_ms = (argc >= 4) ? strtoll(argv[2], NULL, 10) : 0;
+    int64_t e_ms = (argc >= 4) ? strtoll(argv[3], NULL, 10) : 0;
+    RishPipe rp = { .pid = -1, .to_fd = -1, .from_fd = -1, .seq = 0 };
+    query_and_emit_calendar(&rp, s_ms, e_ms);
+    rish_close(&rp);
+    return 0;
+}
+
 int main(int argc, char **argv) {
     install_signals();
     if (argc < 2) {
-        fprintf(stderr, "usage: qs-native <cpu|sys-diag|hide-cursor|submenu-watch|wl-workspaces|media-stream|media-status>\n");
+        fprintf(stderr, "usage: qs-native <cpu|sys-diag|hide-cursor|submenu-watch|wl-workspaces|media-stream|media-status|focus-status|focus-toggle|calendar>\n");
         return 2;
     }
     const char *sub = argv[1];
@@ -1450,6 +1611,9 @@ int main(int argc, char **argv) {
     if (strcmp(sub, "wl-workspaces") == 0) return cmd_wl_workspaces();
     if (strcmp(sub, "media-stream") == 0) return cmd_media_stream();
     if (strcmp(sub, "media-status") == 0) return cmd_media_status();
+    if (strcmp(sub, "focus-status") == 0) return cmd_focus_status();
+    if (strcmp(sub, "focus-toggle") == 0) return cmd_focus_toggle();
+    if (strcmp(sub, "calendar") == 0) return cmd_calendar(argc, argv);
 
     fprintf(stderr, "qs-native: unknown subcommand '%s'\n", sub);
     return 2;

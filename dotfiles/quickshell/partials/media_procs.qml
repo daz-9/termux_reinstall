@@ -7,27 +7,26 @@
             onRead: line => {
                 try {
                     const d = JSON.parse((line || "").trim() || "{}");
-                    if (d.available !== undefined) root.mediaAvailable = Boolean(d.available);
-                    if (d.playing !== undefined) root.mediaPlaying = Boolean(d.playing);
-                    if (d.state !== undefined) root.mediaState = String(d.state);
-                    if (d.package !== undefined) root.mediaPackage = String(d.package);
-                    if (d.app !== undefined) root.mediaApp = String(d.app);
-                    if (d.tag !== undefined) root.mediaTag = String(d.tag);
-                    if (d.title !== undefined) root.mediaTitle = String(d.title);
-                    if (d.artist !== undefined) root.mediaArtist = String(d.artist);
-                    if (d.album !== undefined) root.mediaAlbum = String(d.album);
-                    if (d.pos_sec !== undefined) root.mediaPosSec = Number(d.pos_sec) || 0;
-                    if (d.pos_text !== undefined) root.mediaPosText = String(d.pos_text);
+                    root.handleHubMessage(d);
                 } catch (e) {}
             }
         }
     }
+
+    Component.onCompleted: root.rebuildCalendarGrid()
 
     Timer {
         interval: 5000
         running: root.widgetsOpen
         repeat: true
         onTriggered: root.refreshMedia()
+    }
+
+    Timer {
+        interval: 15000
+        running: root.widgetsOpen
+        repeat: true
+        onTriggered: root.refreshFocus()
     }
 
     Timer {

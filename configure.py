@@ -721,6 +721,12 @@ def _render_quickshell(tpl_name: str) -> str:
         "__WEATHER_FN__": ("dotfiles", "quickshell", "partials", "weather_fn.qml"),
         "__WEATHER_PROCS__": ("dotfiles", "quickshell", "partials", "weather_procs.qml"),
         "__WEATHER_CARD__": ("dotfiles", "quickshell", "partials", "weather_card.qml"),
+        "__FOCUS_PROPS__": ("dotfiles", "quickshell", "partials", "focus_props.qml"),
+        "__FOCUS_CARD__": ("dotfiles", "quickshell", "partials", "focus_card.qml"),
+        "__CALENDAR_PROPS__": ("dotfiles", "quickshell", "partials", "calendar_props.qml"),
+        "__CALENDAR_FN__": ("dotfiles", "quickshell", "partials", "calendar_fn.qml"),
+        "__CALENDAR_CARD__": ("dotfiles", "quickshell", "partials", "calendar_card.qml"),
+        "__AGENDA_CARD__": ("dotfiles", "quickshell", "partials", "agenda_card.qml"),
     }
     text = _read_asset("dotfiles", "quickshell", tpl_name)
     for token, asset_parts in partials.items():

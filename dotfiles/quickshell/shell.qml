@@ -25,6 +25,8 @@ ShellRoot {
 __ANDROID_STATUS_PROPS__
 __MEDIA_PROPS__
 __WEATHER_PROPS__
+__FOCUS_PROPS__
+__CALENDAR_PROPS__
     readonly property color colBase: "#e61e1e2e"
     readonly property color colPopupBase: "#f21e1e2e"
     readonly property color colSurface: "#313244"
@@ -40,15 +42,6 @@ __WEATHER_PROPS__
     readonly property color colDark: "#1e1e2e"
     readonly property string uiFont: "JetBrainsMono Nerd Font"
 
-    readonly property var calendarHeaders: ["Mo", "Tu", "We", "Th", "Fr", "Sa", "Su"]
-    readonly property var calendarDays: [
-        { d: "2", cls: "" }, { d: "3", cls: "" }, { d: "4", cls: "" }, { d: "5", cls: "" }, { d: "6", cls: "" }, { d: "7", cls: "wknd" }, { d: "8", cls: "wknd" },
-        { d: "9", cls: "" }, { d: "10", cls: "" }, { d: "11", cls: "" }, { d: "12", cls: "" }, { d: "13", cls: "" }, { d: "14", cls: "wknd" }, { d: "15", cls: "wknd" },
-        { d: "16", cls: "" }, { d: "17", cls: "today" }, { d: "18", cls: "" }, { d: "19", cls: "" }, { d: "20", cls: "" }, { d: "21", cls: "wknd" }, { d: "22", cls: "wknd" },
-        { d: "23", cls: "" }, { d: "24", cls: "" }, { d: "25", cls: "" }, { d: "26", cls: "" }, { d: "27", cls: "" }, { d: "28", cls: "wknd" }, { d: "29", cls: "wknd" },
-        { d: "30", cls: "" }, { d: "1", cls: "muted" }, { d: "2", cls: "muted" }, { d: "3", cls: "muted" }, { d: "4", cls: "muted" }, { d: "5", cls: "muted" }, { d: "6", cls: "muted" }
-    ]
-
     function runCmd(cmd) {
         Quickshell.execDetached(cmd);
     }
@@ -62,6 +55,7 @@ __WEATHER_PROPS__
 __ANDROID_STATUS_FN__
 __MEDIA_FN__
 __WEATHER_FN__
+__CALENDAR_FN__
     function toggleWidgets() {
         if (root.widgetsOpen) {
             closeWidgets();
@@ -72,6 +66,9 @@ __WEATHER_FN__
             root.widgetsOpen = true;
             root.refreshAndroidStatus();
             root.refreshMedia();
+            root.refreshFocus();
+            root.rebuildCalendarGrid();
+            root.queryCalendarMonth(root.calViewYear, root.calViewMonth);
             root.refreshWeatherIfStale();
             syncWatcher();
         }
@@ -652,224 +649,15 @@ __WEATHER_PROCS__
 
 __WEATHER_CARD__
 
-                            Rectangle {
-                                Layout.fillWidth: true
-                                implicitHeight: focusCol.implicitHeight + 40
-                                radius: 20
-                                color: root.colSurface
-                                border.color: root.colSurface1
-                                border.width: 1
-
-                                Column {
-                                    id: focusCol
-                                    anchors.fill: parent
-                                    anchors.margins: 20
-                                    spacing: 8
-                                    Row {
-                                        spacing: 12
-                                        Text {
-                                            anchors.verticalCenter: parent.verticalCenter
-                                            text: "󰖩"
-                                            color: root.colTeal
-                                            font.family: root.uiFont
-                                            font.pixelSize: 38
-                                        }
-                                        Text {
-                                            anchors.verticalCenter: parent.verticalCenter
-                                            text: "Termux"
-                                            color: root.colText
-                                            font.family: root.uiFont
-                                            font.pixelSize: 32
-                                            font.bold: true
-                                        }
-                                    }
-                                    Text {
-                                        text: "Do Not Disturb · On"
-                                        color: root.colSubtext
-                                        font.family: root.uiFont
-                                        font.pixelSize: 21
-                                    }
-                                }
-                            }
+__FOCUS_CARD__
                         }
 
 __ANDROID_STATUS_CARD__
-                        // Spotify Card Space (Mockup)
 __MEDIA_CARD__
 
-                        // Calendar Space (Mockup)
-                        Rectangle {
-                            Layout.fillWidth: true
-                            implicitHeight: calCol.implicitHeight + 44
-                            radius: 20
-                            color: root.colSurface
-                            border.color: root.colSurface1
-                            border.width: 1
+__CALENDAR_CARD__
 
-                            Column {
-                                id: calCol
-                                anchors.fill: parent
-                                anchors.leftMargin: 24
-                                anchors.rightMargin: 24
-                                anchors.topMargin: 22
-                                anchors.bottomMargin: 22
-                                spacing: 14
-
-                                RowLayout {
-                                    width: parent.width
-                                    Row {
-                                        spacing: 12
-                                        Text {
-                                            anchors.verticalCenter: parent.verticalCenter
-                                            text: "󰃭"
-                                            color: root.colBlue
-                                            font.family: root.uiFont
-                                            font.pixelSize: 28
-                                        }
-                                        Text {
-                                            anchors.verticalCenter: parent.verticalCenter
-                                            text: "November 2026"
-                                            color: root.colText
-                                            font.family: root.uiFont
-                                            font.pixelSize: 24
-                                            font.bold: true
-                                        }
-                                    }
-                                    Item { Layout.fillWidth: true }
-                                    Text {
-                                        text: "󰅁   󰅂"
-                                        color: root.colSubtext
-                                        font.family: root.uiFont
-                                        font.pixelSize: 24
-                                    }
-                                }
-
-                                GridLayout {
-                                    width: parent.width
-                                    columns: 7
-                                    columnSpacing: 6
-                                    rowSpacing: 8
-
-                                    Repeater {
-                                        model: root.calendarHeaders
-                                        delegate: Item {
-                                            required property string modelData
-                                            Layout.fillWidth: true
-                                            implicitHeight: 42
-                                            Text {
-                                                anchors.centerIn: parent
-                                                text: modelData
-                                                color: root.colSubtext
-                                                font.family: root.uiFont
-                                                font.pixelSize: 21
-                                                font.bold: true
-                                            }
-                                        }
-                                    }
-
-                                    Repeater {
-                                        model: root.calendarDays
-                                        delegate: Rectangle {
-                                            required property var modelData
-                                            Layout.fillWidth: true
-                                            implicitHeight: 46
-                                            radius: 14
-                                            color: modelData.cls === "today" ? root.colBlue : "transparent"
-                                            Text {
-                                                anchors.centerIn: parent
-                                                text: modelData.d
-                                                color: modelData.cls === "today"
-                                                    ? root.colDark
-                                                    : (modelData.cls === "muted"
-                                                        ? root.colSurface1
-                                                        : (modelData.cls === "wknd" ? root.colSubtext : root.colText))
-                                                font.family: root.uiFont
-                                                font.pixelSize: 23
-                                                font.bold: modelData.cls === "today"
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
-
-                        // Agenda / Notes Space (Mockup)
-                        Rectangle {
-                            Layout.fillWidth: true
-                            Layout.fillHeight: true
-                            implicitHeight: agendaCol.implicitHeight + 44
-                            radius: 20
-                            color: root.colSurface
-                            border.color: root.colSurface1
-                            border.width: 1
-
-                            Column {
-                                id: agendaCol
-                                anchors.fill: parent
-                                anchors.leftMargin: 24
-                                anchors.rightMargin: 24
-                                anchors.topMargin: 22
-                                anchors.bottomMargin: 22
-                                spacing: 14
-
-                                Row {
-                                    spacing: 12
-                                    Text {
-                                        anchors.verticalCenter: parent.verticalCenter
-                                        text: "󰎚"
-                                        color: root.colMauve
-                                        font.family: root.uiFont
-                                        font.pixelSize: 28
-                                    }
-                                    Text {
-                                        anchors.verticalCenter: parent.verticalCenter
-                                        text: "Agenda"
-                                        color: root.colText
-                                        font.family: root.uiFont
-                                        font.pixelSize: 24
-                                        font.bold: true
-                                    }
-                                }
-
-                                Repeater {
-                                    model: [
-                                        { t: "19:00", col: root.colBlue, txt: "Build Termux X11 Dock" },
-                                        { t: "21:30", col: root.colMauve, txt: "Sync Dotfiles & GUI Rules" },
-                                        { t: "22:45", col: root.colTeal, txt: "Wrap Up Workspace Widgets" }
-                                    ]
-                                    delegate: Rectangle {
-                                        required property var modelData
-                                        width: parent.width
-                                        height: 54
-                                        radius: 14
-                                        color: root.colPopupBase
-                                        border.color: root.colSurface1
-                                        border.width: 1
-                                        Row {
-                                            anchors.verticalCenter: parent.verticalCenter
-                                            anchors.left: parent.left
-                                            anchors.leftMargin: 16
-                                            spacing: 16
-                                            Text {
-                                                anchors.verticalCenter: parent.verticalCenter
-                                                text: modelData.t
-                                                color: modelData.col
-                                                font.family: root.uiFont
-                                                font.pixelSize: 21
-                                                font.bold: true
-                                            }
-                                            Text {
-                                                anchors.verticalCenter: parent.verticalCenter
-                                                text: modelData.txt
-                                                color: root.colText
-                                                font.family: root.uiFont
-                                                font.pixelSize: 21
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
+__AGENDA_CARD__
                     }
                 }
             }
