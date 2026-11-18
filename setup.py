@@ -98,6 +98,12 @@ def install_x11() -> int:
     run(["pkg", "update", "-y"], "pkg update")
     run(["pkg", "upgrade", "-y"], "pkg upgrade")
     _install_packages([
+        "clang",
+        "libx11",
+        "libxi",
+        "libxfixes",
+        "termux-api",
+        "rish-shizuku",
         "termux-x11-nightly",
         "quickshell",
         "eww",
