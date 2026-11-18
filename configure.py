@@ -3448,6 +3448,572 @@ _QS_ANDROID_STATUS_CARD = """                        // Termux:API & Shizuku Sta
                         }
 """
 
+QUICKSHELL_MEDIA_CONTROL_PY = """#!/data/data/com.termux/files/usr/bin/python3
+\"\"\"Query and control Android MediaSession playback via rish (Shizuku).\"\"\"
+
+import json
+import os
+import re
+import shutil
+import subprocess
+import sys
+
+
+def _rish_cmd() -> tuple[list[str], dict[str, str]] | tuple[None, None]:
+    prefix = os.environ.get("PREFIX", "/data/data/com.termux/files/usr")
+    dex_path = os.path.join(prefix, "share", "rish-shizuku.dex")
+    env = os.environ.copy()
+    env.pop("LD_LIBRARY_PATH", None)
+    env.pop("LD_PRELOAD", None)
+    env["RISH_APPLICATION_ID"] = "com.termux"
+
+    if os.path.exists(dex_path):
+        try:
+            if (os.stat(dex_path).st_mode & 0o777) & 0o222:
+                os.chmod(dex_path, 0o400)
+        except OSError:
+            pass
+        app_proc = "/system/bin/app_process"
+        if not os.path.exists(app_proc):
+            app_proc = shutil.which("app_process") or "app_process"
+        return [
+            app_proc,
+            f"-Djava.class.path={dex_path}",
+            "/system/bin",
+            "--nice-name=rish",
+            "rikka.shizuku.shell.ShizukuShellLoader",
+            "-c",
+        ], env
+
+    rish_bin = shutil.which("rish")
+    if rish_bin:
+        return [rish_bin, "-c"], env
+    return None, None
+
+
+def _run_rish(shell_cmd: str, stdin_text: str = "", timeout_s: float = 2.8) -> tuple[int, str]:
+    base, env = _rish_cmd()
+    if not base:
+        return 127, ""
+    try:
+        res = subprocess.run(
+            base + [shell_cmd],
+            env=env,
+            input=stdin_text if stdin_text else None,
+            stdin=None if stdin_text else subprocess.DEVNULL,
+            capture_output=True,
+            text=True,
+            timeout=timeout_s,
+        )
+        return res.returncode, (res.stdout or "") + "\\n" + (res.stderr or "")
+    except (OSError, subprocess.SubprocessError):
+        return 1, ""
+
+
+def _uptime_ms() -> int:
+    try:
+        with open("/proc/uptime") as f:
+            first = f.read().split()[0]
+        return int(float(first) * 1000.0)
+    except (OSError, IndexError, ValueError):
+        return 0
+
+
+def _app_label(pkg: str) -> str:
+    known = {
+        "com.spotify.music": "Spotify",
+        "com.spotify.lite": "Spotify Lite",
+        "com.google.android.apps.youtube.music": "YT Music",
+        "app.morphe.android.apps.youtube.music": "YT Music",
+        "com.google.android.youtube": "YouTube",
+        "app.revanced.android.youtube": "YouTube",
+        "org.videolan.vlc": "VLC",
+        "com.apple.android.music": "Apple Music",
+    }
+    if pkg in known:
+        return known[pkg]
+    parts = [p for p in pkg.split(".") if p and p not in ("com", "org", "app", "android", "apps", "music")]
+    return parts[-1].capitalize() if parts else (pkg or "Media")
+
+
+def _fmt_time(sec: int) -> str:
+    sec = max(0, sec)
+    m, s = divmod(sec, 60)
+    h, m = divmod(m, 60)
+    if h > 0:
+        return f"{h}:{m:02d}:{s:02d}"
+    return f"{m}:{s:02d}"
+
+
+def _parse_description(desc: str) -> tuple[str, str, str]:
+    if not desc or desc == "null":
+        return "", "", ""
+    parts = [p.strip() for p in desc.split(", ")]
+    clean = [("" if p == "null" else p) for p in parts]
+    if len(clean) == 1:
+        return clean[0], "", ""
+    if len(clean) == 2:
+        return clean[0], clean[1], ""
+    album = clean[-1]
+    artist = clean[-2]
+    title = ", ".join(clean[:-2]).strip()
+    return title, artist, album
+
+
+def get_status() -> dict:
+    rc, out = _run_rish("echo UPTIME:$(cat /proc/uptime 2>/dev/null); dumpsys media_session 2>/dev/null")
+    if rc != 0:
+        return {
+            "available": False,
+            "playing": False,
+            "state": "SHIZUKU OFF",
+            "package": "",
+            "app": "Media Control",
+            "tag": "",
+            "title": "Shizuku inactive",
+            "artist": "Start Shizuku to control media",
+            "album": "",
+            "pos_sec": 0,
+            "pos_text": "--:--",
+        }
+
+    uptime_ms = 0
+    for raw in out.splitlines():
+        if raw.startswith("UPTIME:"):
+            toks = raw[7:].strip().split()
+            if toks:
+                try:
+                    uptime_ms = int(float(toks[0]) * 1000.0)
+                except ValueError:
+                    uptime_ms = 0
+            break
+    if uptime_ms <= 0:
+        uptime_ms = _uptime_ms()
+
+    btn_tag = ""
+    btn_pkg = ""
+    m_btn = re.search(r"Media button session is\\s+([^/\\s]+)/([^/\\s]+)/", out)
+    if m_btn:
+        btn_pkg, btn_tag = m_btn.group(1), m_btn.group(2)
+
+    sessions = []
+    in_stack = False
+    cur = None
+    for raw in out.splitlines():
+        line = raw.rstrip("\\r\\n")
+        if "Sessions Stack - have" in line:
+            in_stack = True
+            continue
+        if not in_stack:
+            continue
+        indent = len(line) - len(line.lstrip(" "))
+        stripped = line.strip()
+        if not stripped:
+            continue
+        if indent <= 2:
+            break
+        if indent == 4:
+            if cur:
+                sessions.append(cur)
+            # Example: spotify-media-session com.spotify.music/spotify-media-session/485 (userId=0)
+            m_hdr = re.match(r"^(.+?)\\s+([^/\\s]+)/([^/\\s]+)/\\d+\\s+\\(userId=", stripped)
+            cur = {
+                "tag": m_hdr.group(3) if m_hdr else stripped.split()[0],
+                "package": m_hdr.group(2) if m_hdr else "",
+                "active": False,
+                "state_name": "NONE",
+                "state_code": 0,
+                "pos_ms": 0,
+                "speed": 0.0,
+                "updated_ms": 0,
+                "title": "",
+                "artist": "",
+                "album": "",
+            }
+        elif cur and indent >= 6:
+            if stripped.startswith("package="):
+                cur["package"] = stripped.split("=", 1)[1].strip()
+            elif stripped.startswith("active="):
+                cur["active"] = stripped.split("=", 1)[1].strip().lower() == "true"
+            elif stripped.startswith("state=PlaybackState"):
+                ms = re.search(r"state=([A-Z_]+)\\((\\d+)\\)", stripped)
+                if ms:
+                    cur["state_name"] = ms.group(1)
+                    cur["state_code"] = int(ms.group(2))
+                mp = re.search(r"position=(\\d+)", stripped)
+                if mp:
+                    cur["pos_ms"] = int(mp.group(1))
+                mv = re.search(r"speed=([0-9.]+)", stripped)
+                if mv:
+                    try:
+                        cur["speed"] = float(mv.group(1))
+                    except ValueError:
+                        cur["speed"] = 0.0
+                mu = re.search(r"updated=(\\d+)", stripped)
+                if mu:
+                    cur["updated_ms"] = int(mu.group(1))
+            elif stripped.startswith("metadata:") and "description=" in stripped:
+                desc = stripped.split("description=", 1)[1].strip()
+                cur["title"], cur["artist"], cur["album"] = _parse_description(desc)
+
+    if cur:
+        sessions.append(cur)
+
+    # Ignore sessions with neither title nor active playback unless nothing else exists.
+    usable = [s for s in sessions if s["title"] or s["state_code"] in (2, 3, 6)]
+    if not usable:
+        return {
+            "available": True,
+            "playing": False,
+            "state": "IDLE",
+            "package": "",
+            "app": "Media Control",
+            "tag": "",
+            "title": "Nothing Playing",
+            "artist": "Open Spotify or a media app",
+            "album": "",
+            "pos_sec": 0,
+            "pos_text": "0:00",
+        }
+
+    def _score(s: dict) -> tuple[int, int, int, int]:
+        return (
+            1 if s["state_code"] == 3 else 0,
+            1 if "spotify" in s["package"] else 0,
+            1 if (s["package"] == btn_pkg and s["tag"] == btn_tag) else 0,
+            1 if s["active"] else 0,
+        )
+
+    chosen = max(usable, key=_score)
+    playing = chosen["state_code"] in (3, 6)
+    pos_ms = chosen["pos_ms"]
+    if chosen["state_code"] == 3 and chosen["updated_ms"] > 0 and chosen["speed"] > 0:
+        if uptime_ms >= chosen["updated_ms"]:
+            pos_ms = max(0, int(pos_ms + (uptime_ms - chosen["updated_ms"]) * chosen["speed"]))
+    pos_sec = pos_ms // 1000
+
+    return {
+        "available": True,
+        "playing": playing,
+        "state": chosen["state_name"],
+        "package": chosen["package"],
+        "app": _app_label(chosen["package"]),
+        "tag": chosen["tag"],
+        "title": chosen["title"] or _app_label(chosen["package"]),
+        "artist": chosen["artist"],
+        "album": chosen["album"],
+        "pos_sec": pos_sec,
+        "pos_text": _fmt_time(pos_sec),
+    }
+
+
+def dispatch_action(action: str, tag: str = "", is_playing: str = "") -> int:
+    allowed = {"play", "pause", "play-pause", "next", "previous", "stop"}
+    if action not in allowed:
+        return 2
+
+    if tag and re.fullmatch(r"[A-Za-z0-9._ -]+", tag):
+        mon_cmd = action
+        if action == "play-pause":
+            mon_cmd = "pause" if is_playing == "1" else "play"
+        if mon_cmd in ("play", "pause", "next", "previous"):
+            rc, _ = _run_rish(f"cmd media_session monitor '{tag}'", stdin_text=f"{mon_cmd}\\nq\\n", timeout_s=2.5)
+            if rc == 0:
+                return 0
+
+    rc, _ = _run_rish(f"cmd media_session dispatch {action}", timeout_s=2.5)
+    return 0 if rc == 0 else 1
+
+
+def main() -> int:
+    cmd = sys.argv[1] if len(sys.argv) > 1 else "status"
+    if cmd == "status":
+        print(json.dumps(get_status()), flush=True)
+        return 0
+    tag = sys.argv[2] if len(sys.argv) > 2 else ""
+    is_playing = sys.argv[3] if len(sys.argv) > 3 else ""
+    return dispatch_action(cmd, tag, is_playing)
+
+
+if __name__ == "__main__":
+    sys.exit(main())
+"""
+
+_QS_MEDIA_PROPS = """    property bool mediaAvailable: false
+    property bool mediaPlaying: false
+    property string mediaState: "IDLE"
+    property string mediaPackage: ""
+    property string mediaApp: "Media Control"
+    property string mediaTag: ""
+    property string mediaTitle: "Nothing Playing"
+    property string mediaArtist: "Checking MediaSession..."
+    property string mediaAlbum: ""
+    property int mediaPosSec: 0
+    property string mediaPosText: "0:00"
+"""
+
+_QS_MEDIA_FN = """    function fmtMediaSec(sec) {
+        const s = Math.max(0, Math.floor(sec));
+        const m = Math.floor(s / 60);
+        const rem = s % 60;
+        return m + ":" + (rem < 10 ? "0" + rem : rem);
+    }
+
+    function refreshMedia() {
+        if (!mediaPollProc.running) {
+            mediaPollProc.running = true;
+        }
+    }
+
+    function sendMediaAction(act) {
+        const wasPlaying = root.mediaPlaying ? "1" : "0";
+        if (act === "play-pause") {
+            root.mediaPlaying = !root.mediaPlaying;
+            root.mediaState = root.mediaPlaying ? "PLAYING" : "PAUSED";
+        }
+        const cmd = [
+            "python3",
+            Quickshell.env("HOME") + "/.config/quickshell/scripts/media_control.py",
+            act,
+            root.mediaTag,
+            wasPlaying
+        ];
+        Quickshell.execDetached(cmd);
+        mediaSyncTimer.restart();
+    }
+"""
+
+_QS_MEDIA_PROCS = """    Process {
+        id: mediaPollProc
+        command: ["python3", Quickshell.env("HOME") + "/.config/quickshell/scripts/media_control.py", "status"]
+        running: false
+        stdout: StdioCollector {
+            onStreamFinished: {
+                try {
+                    const d = JSON.parse((this.text || "").trim() || "{}");
+                    if (d.available !== undefined) root.mediaAvailable = Boolean(d.available);
+                    if (d.playing !== undefined) root.mediaPlaying = Boolean(d.playing);
+                    if (d.state !== undefined) root.mediaState = String(d.state);
+                    if (d.package !== undefined) root.mediaPackage = String(d.package);
+                    if (d.app !== undefined) root.mediaApp = String(d.app);
+                    if (d.tag !== undefined) root.mediaTag = String(d.tag);
+                    if (d.title !== undefined) root.mediaTitle = String(d.title);
+                    if (d.artist !== undefined) root.mediaArtist = String(d.artist);
+                    if (d.album !== undefined) root.mediaAlbum = String(d.album);
+                    if (d.pos_sec !== undefined) root.mediaPosSec = Number(d.pos_sec) || 0;
+                    if (d.pos_text !== undefined) root.mediaPosText = String(d.pos_text);
+                } catch (e) {}
+            }
+        }
+    }
+
+    Timer {
+        interval: 1800
+        running: true
+        repeat: false
+        onTriggered: root.refreshMedia()
+    }
+
+    Timer {
+        interval: 5000
+        running: root.widgetsOpen
+        repeat: true
+        onTriggered: root.refreshMedia()
+    }
+
+    Timer {
+        interval: 1000
+        running: root.widgetsOpen && root.mediaPlaying
+        repeat: true
+        onTriggered: {
+            root.mediaPosSec += 1;
+            root.mediaPosText = root.fmtMediaSec(root.mediaPosSec);
+        }
+    }
+
+    Timer {
+        id: mediaSyncTimer
+        interval: 450
+        repeat: false
+        onTriggered: root.refreshMedia()
+    }
+"""
+
+_QS_MEDIA_CARD = """                        // Android MediaSession Control Card (via rish)
+                        Rectangle {
+                            Layout.fillWidth: true
+                            implicitHeight: spotifyCol.implicitHeight + 44
+                            radius: 20
+                            color: root.colSurface
+                            border.color: root.colSurface1
+                            border.width: 1
+
+                            Column {
+                                id: spotifyCol
+                                anchors.fill: parent
+                                anchors.leftMargin: 24
+                                anchors.rightMargin: 24
+                                anchors.topMargin: 22
+                                anchors.bottomMargin: 22
+                                spacing: 18
+
+                                Row {
+                                    width: parent.width
+                                    spacing: 20
+                                    Rectangle {
+                                        width: 112
+                                        height: 112
+                                        radius: 18
+                                        color: root.colSurface1
+                                        Text {
+                                            anchors.centerIn: parent
+                                            text: root.mediaPackage.indexOf("spotify") >= 0 ? "\U000f04c7" : "\U000f0384"
+                                            color: root.mediaPackage.indexOf("spotify") >= 0 ? root.colGreen : (root.mediaPlaying ? root.colBlue : root.colSubtext)
+                                            font.family: root.uiFont
+                                            font.pixelSize: 54
+                                        }
+                                        MouseArea {
+                                            anchors.fill: parent
+                                            onClicked: root.refreshMedia()
+                                        }
+                                    }
+                                    Column {
+                                        width: parent.width - 132
+                                        anchors.verticalCenter: parent.verticalCenter
+                                        spacing: 6
+                                        Text {
+                                            width: parent.width
+                                            elide: Text.ElideRight
+                                            text: root.mediaApp.toUpperCase() + " · " + root.mediaState
+                                            color: root.mediaPlaying ? root.colGreen : (root.mediaAvailable ? root.colBlue : root.colPeach)
+                                            font.family: root.uiFont
+                                            font.pixelSize: 16
+                                            font.bold: true
+                                        }
+                                        Text {
+                                            width: parent.width
+                                            elide: Text.ElideRight
+                                            text: root.mediaTitle
+                                            color: root.colText
+                                            font.family: root.uiFont
+                                            font.pixelSize: 27
+                                            font.bold: true
+                                        }
+                                        Text {
+                                            width: parent.width
+                                            elide: Text.ElideRight
+                                            text: root.mediaArtist + (root.mediaAlbum.length > 0 ? " · " + root.mediaAlbum : "")
+                                            color: root.colSubtext
+                                            font.family: root.uiFont
+                                            font.pixelSize: 22
+                                        }
+                                    }
+                                }
+
+                                Column {
+                                    width: parent.width
+                                    spacing: 8
+                                    Rectangle {
+                                        width: parent.width
+                                        height: 10
+                                        radius: 5
+                                        color: root.colSurface1
+                                        Rectangle {
+                                            width: root.mediaPlaying
+                                                ? parent.width * Math.min(1.0, Math.max(0.08, (root.mediaPosSec % 240) / 240.0))
+                                                : (root.mediaPosSec > 0 ? parent.width * Math.min(1.0, Math.max(0.08, (root.mediaPosSec % 240) / 240.0)) : 0)
+                                            height: parent.height
+                                            radius: 5
+                                            color: root.mediaPlaying ? root.colGreen : root.colBlue
+                                            Behavior on width { NumberAnimation { duration: 250 } }
+                                        }
+                                    }
+                                    RowLayout {
+                                        width: parent.width
+                                        Text {
+                                            text: root.mediaPosText
+                                            color: root.colSubtext
+                                            font.family: root.uiFont
+                                            font.pixelSize: 19
+                                            font.bold: true
+                                        }
+                                        Item { Layout.fillWidth: true }
+                                        Text {
+                                            text: root.mediaPlaying ? "Playing" : (root.mediaState === "PAUSED" ? "Paused" : root.mediaApp)
+                                            color: root.colSubtext
+                                            font.family: root.uiFont
+                                            font.pixelSize: 19
+                                            font.bold: true
+                                        }
+                                    }
+                                }
+
+                                Row {
+                                    anchors.horizontalCenter: parent.horizontalCenter
+                                    spacing: 28
+                                    Rectangle {
+                                        anchors.verticalCenter: parent.verticalCenter
+                                        width: 56
+                                        height: 56
+                                        radius: 16
+                                        color: prevArea.pressed ? root.colSurface1 : "transparent"
+                                        Text {
+                                            anchors.centerIn: parent
+                                            text: "\U000f04ae"
+                                            color: prevArea.pressed ? root.colText : root.colSubtext
+                                            font.family: root.uiFont
+                                            font.pixelSize: 32
+                                        }
+                                        MouseArea {
+                                            id: prevArea
+                                            anchors.fill: parent
+                                            onClicked: root.sendMediaAction("previous")
+                                        }
+                                    }
+                                    Rectangle {
+                                        width: 62
+                                        height: 62
+                                        radius: 31
+                                        color: playArea.pressed ? root.colBlue : (root.mediaPlaying ? root.colGreen : root.colBlue)
+                                        scale: playArea.pressed ? 0.92 : 1.0
+                                        Behavior on scale { NumberAnimation { duration: 80 } }
+                                        Text {
+                                            anchors.centerIn: parent
+                                            text: root.mediaPlaying ? "\U000f03e4" : "\U000f040a"
+                                            color: root.colDark
+                                            font.family: root.uiFont
+                                            font.pixelSize: 30
+                                        }
+                                        MouseArea {
+                                            id: playArea
+                                            anchors.fill: parent
+                                            onClicked: root.sendMediaAction("play-pause")
+                                        }
+                                    }
+                                    Rectangle {
+                                        anchors.verticalCenter: parent.verticalCenter
+                                        width: 56
+                                        height: 56
+                                        radius: 16
+                                        color: nextArea.pressed ? root.colSurface1 : "transparent"
+                                        Text {
+                                            anchors.centerIn: parent
+                                            text: "\U000f04ad"
+                                            color: nextArea.pressed ? root.colText : root.colSubtext
+                                            font.family: root.uiFont
+                                            font.pixelSize: 32
+                                        }
+                                        MouseArea {
+                                            id: nextArea
+                                            anchors.fill: parent
+                                            onClicked: root.sendMediaAction("next")
+                                        }
+                                    }
+                                }
+                            }
+                        }
+"""
+
 QUICKSHELL_QML = """import Quickshell
 import Quickshell.Io
 import QtQuick
@@ -3473,6 +4039,7 @@ ShellRoot {
     property bool widgetsOpen: false
     property bool widgetsActive: false
 __ANDROID_STATUS_PROPS__
+__MEDIA_PROPS__
     readonly property color colBase: "#e61e1e2e"
     readonly property color colPopupBase: "#f21e1e2e"
     readonly property color colSurface: "#313244"
@@ -3508,6 +4075,7 @@ __ANDROID_STATUS_PROPS__
     }
 
 __ANDROID_STATUS_FN__
+__MEDIA_FN__
     function toggleWidgets() {
         if (root.widgetsOpen) {
             closeWidgets();
@@ -3517,6 +4085,7 @@ __ANDROID_STATUS_FN__
             root.widgetsActive = true;
             root.widgetsOpen = true;
             root.refreshAndroidStatus();
+            root.refreshMedia();
             syncWatcher();
         }
     }
@@ -3667,6 +4236,7 @@ __ANDROID_STATUS_FN__
     }
 
 __ANDROID_STATUS_PROCS__
+__MEDIA_PROCS__
     Timer {
         interval: 4000
         running: true
@@ -4175,133 +4745,7 @@ __ANDROID_STATUS_PROCS__
 
 __ANDROID_STATUS_CARD__
                         // Spotify Card Space (Mockup)
-                        Rectangle {
-                            Layout.fillWidth: true
-                            implicitHeight: spotifyCol.implicitHeight + 44
-                            radius: 20
-                            color: root.colSurface
-                            border.color: root.colSurface1
-                            border.width: 1
-
-                            Column {
-                                id: spotifyCol
-                                anchors.fill: parent
-                                anchors.leftMargin: 24
-                                anchors.rightMargin: 24
-                                anchors.topMargin: 22
-                                anchors.bottomMargin: 22
-                                spacing: 18
-
-                                Row {
-                                    width: parent.width
-                                    spacing: 20
-                                    Rectangle {
-                                        width: 112
-                                        height: 112
-                                        radius: 18
-                                        color: root.colSurface1
-                                        Text {
-                                            anchors.centerIn: parent
-                                            text: "\U000f04c7"
-                                            color: root.colGreen
-                                            font.family: root.uiFont
-                                            font.pixelSize: 54
-                                        }
-                                    }
-                                    Column {
-                                        anchors.verticalCenter: parent.verticalCenter
-                                        spacing: 6
-                                        Text {
-                                            text: "NOW PLAYING"
-                                            color: root.colGreen
-                                            font.family: root.uiFont
-                                            font.pixelSize: 16
-                                            font.bold: true
-                                        }
-                                        Text {
-                                            text: "Midnight City"
-                                            color: root.colText
-                                            font.family: root.uiFont
-                                            font.pixelSize: 27
-                                            font.bold: true
-                                        }
-                                        Text {
-                                            text: "M83 · Hurry Up, We're Dreaming"
-                                            color: root.colSubtext
-                                            font.family: root.uiFont
-                                            font.pixelSize: 22
-                                        }
-                                    }
-                                }
-
-                                Column {
-                                    width: parent.width
-                                    spacing: 8
-                                    Rectangle {
-                                        width: parent.width
-                                        height: 10
-                                        radius: 5
-                                        color: root.colSurface1
-                                        Rectangle {
-                                            width: parent.width * 0.46
-                                            height: parent.height
-                                            radius: 5
-                                            color: root.colGreen
-                                        }
-                                    }
-                                    RowLayout {
-                                        width: parent.width
-                                        Text {
-                                            text: "1:42"
-                                            color: root.colSubtext
-                                            font.family: root.uiFont
-                                            font.pixelSize: 19
-                                            font.bold: true
-                                        }
-                                        Item { Layout.fillWidth: true }
-                                        Text {
-                                            text: "3:55"
-                                            color: root.colSubtext
-                                            font.family: root.uiFont
-                                            font.pixelSize: 19
-                                            font.bold: true
-                                        }
-                                    }
-                                }
-
-                                Row {
-                                    anchors.horizontalCenter: parent.horizontalCenter
-                                    spacing: 40
-                                    Text {
-                                        anchors.verticalCenter: parent.verticalCenter
-                                        text: "\U000f04ae"
-                                        color: root.colSubtext
-                                        font.family: root.uiFont
-                                        font.pixelSize: 32
-                                    }
-                                    Rectangle {
-                                        width: 62
-                                        height: 62
-                                        radius: 31
-                                        color: root.colGreen
-                                        Text {
-                                            anchors.centerIn: parent
-                                            text: "\U000f03e4"
-                                            color: root.colDark
-                                            font.family: root.uiFont
-                                            font.pixelSize: 30
-                                        }
-                                    }
-                                    Text {
-                                        anchors.verticalCenter: parent.verticalCenter
-                                        text: "\U000f04ad"
-                                        color: root.colSubtext
-                                        font.family: root.uiFont
-                                        font.pixelSize: 32
-                                    }
-                                }
-                            }
-                        }
+__MEDIA_CARD__
 
                         // Calendar Space (Mockup)
                         Rectangle {
@@ -4612,6 +5056,7 @@ ShellRoot {
     property bool widgetsOpen: false
     property bool widgetsActive: false
 __ANDROID_STATUS_PROPS__
+__MEDIA_PROPS__
     readonly property color colBase: "#e61e1e2e"
     readonly property color colPopupBase: "#f21e1e2e"
     readonly property color colSurface: "#313244"
@@ -4656,6 +5101,7 @@ __ANDROID_STATUS_PROPS__
     }
 
 __ANDROID_STATUS_FN__
+__MEDIA_FN__
     function findFocusedTitle(node) {
         if (!node) return "";
         if (node.focused && node.name && node.type !== "workspace" && node.type !== "output" && node.type !== "root") {
@@ -4678,6 +5124,7 @@ __ANDROID_STATUS_FN__
             root.widgetsActive = true;
             root.widgetsOpen = true;
             root.refreshAndroidStatus();
+            root.refreshMedia();
         }
     }
 
@@ -4840,6 +5287,7 @@ __ANDROID_STATUS_FN__
     }
 
 __ANDROID_STATUS_PROCS__
+__MEDIA_PROCS__
     Timer {
         interval: 1000
         running: true
@@ -5690,133 +6138,7 @@ __ANDROID_STATUS_PROCS__
                         }
 
 __ANDROID_STATUS_CARD__
-                        Rectangle {
-                            Layout.fillWidth: true
-                            implicitHeight: spotifyCol.implicitHeight + 44
-                            radius: 20
-                            color: root.colSurface
-                            border.color: root.colSurface1
-                            border.width: 1
-
-                            Column {
-                                id: spotifyCol
-                                anchors.fill: parent
-                                anchors.leftMargin: 24
-                                anchors.rightMargin: 24
-                                anchors.topMargin: 22
-                                anchors.bottomMargin: 22
-                                spacing: 18
-
-                                Row {
-                                    width: parent.width
-                                    spacing: 20
-                                    Rectangle {
-                                        width: 112
-                                        height: 112
-                                        radius: 18
-                                        color: root.colSurface1
-                                        Text {
-                                            anchors.centerIn: parent
-                                            text: "\U000f04c7"
-                                            color: root.colGreen
-                                            font.family: root.uiFont
-                                            font.pixelSize: 54
-                                        }
-                                    }
-                                    Column {
-                                        anchors.verticalCenter: parent.verticalCenter
-                                        spacing: 6
-                                        Text {
-                                            text: "NOW PLAYING"
-                                            color: root.colGreen
-                                            font.family: root.uiFont
-                                            font.pixelSize: 16
-                                            font.bold: true
-                                        }
-                                        Text {
-                                            text: "Midnight City"
-                                            color: root.colText
-                                            font.family: root.uiFont
-                                            font.pixelSize: 27
-                                            font.bold: true
-                                        }
-                                        Text {
-                                            text: "M83 · Hurry Up, We're Dreaming"
-                                            color: root.colSubtext
-                                            font.family: root.uiFont
-                                            font.pixelSize: 22
-                                        }
-                                    }
-                                }
-
-                                Column {
-                                    width: parent.width
-                                    spacing: 8
-                                    Rectangle {
-                                        width: parent.width
-                                        height: 10
-                                        radius: 5
-                                        color: root.colSurface1
-                                        Rectangle {
-                                            width: parent.width * 0.46
-                                            height: parent.height
-                                            radius: 5
-                                            color: root.colGreen
-                                        }
-                                    }
-                                    RowLayout {
-                                        width: parent.width
-                                        Text {
-                                            text: "1:42"
-                                            color: root.colSubtext
-                                            font.family: root.uiFont
-                                            font.pixelSize: 19
-                                            font.bold: true
-                                        }
-                                        Item { Layout.fillWidth: true }
-                                        Text {
-                                            text: "3:55"
-                                            color: root.colSubtext
-                                            font.family: root.uiFont
-                                            font.pixelSize: 19
-                                            font.bold: true
-                                        }
-                                    }
-                                }
-
-                                Row {
-                                    anchors.horizontalCenter: parent.horizontalCenter
-                                    spacing: 40
-                                    Text {
-                                        anchors.verticalCenter: parent.verticalCenter
-                                        text: "\U000f04ae"
-                                        color: root.colSubtext
-                                        font.family: root.uiFont
-                                        font.pixelSize: 32
-                                    }
-                                    Rectangle {
-                                        width: 62
-                                        height: 62
-                                        radius: 31
-                                        color: root.colGreen
-                                        Text {
-                                            anchors.centerIn: parent
-                                            text: "\U000f03e4"
-                                            color: root.colDark
-                                            font.family: root.uiFont
-                                            font.pixelSize: 30
-                                        }
-                                    }
-                                    Text {
-                                        anchors.verticalCenter: parent.verticalCenter
-                                        text: "\U000f04ad"
-                                        color: root.colSubtext
-                                        font.family: root.uiFont
-                                        font.pixelSize: 32
-                                    }
-                                }
-                            }
-                        }
+__MEDIA_CARD__
 
                         Rectangle {
                             Layout.fillWidth: true
@@ -7150,6 +7472,10 @@ def configure_x11() -> int:
             .replace("__ANDROID_STATUS_FN__", _QS_ANDROID_STATUS_FN)
             .replace("__ANDROID_STATUS_PROCS__", _QS_ANDROID_STATUS_PROCS)
             .replace("__ANDROID_STATUS_CARD__", _QS_ANDROID_STATUS_CARD)
+            .replace("__MEDIA_PROPS__", _QS_MEDIA_PROPS)
+            .replace("__MEDIA_FN__", _QS_MEDIA_FN)
+            .replace("__MEDIA_PROCS__", _QS_MEDIA_PROCS)
+            .replace("__MEDIA_CARD__", _QS_MEDIA_CARD)
         )
 
     files = [
@@ -7176,6 +7502,7 @@ def configure_x11() -> int:
         ("~/.config/quickshell/scripts/sys_diag.py", QUICKSHELL_SYS_DIAG_PY, 0o755),
         ("~/.config/quickshell/scripts/wl_workspaces.py", QUICKSHELL_WL_WORKSPACES_PY, 0o755),
         ("~/.config/quickshell/scripts/android_status.py", QUICKSHELL_ANDROID_STATUS_PY, 0o755),
+        ("~/.config/quickshell/scripts/media_control.py", QUICKSHELL_MEDIA_CONTROL_PY, 0o755),
         ("~/.config/sway/config", SWAY_CONFIG, 0o644),
         ("~/.config/labwc/rc.xml", LABWC_RC_XML, 0o644),
         ("~/.config/labwc/themerc", LABWC_THEMERC, 0o644),
