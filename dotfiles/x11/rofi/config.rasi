@@ -1,0 +1,158 @@
+/* Catppuccin Mocha touch-coherent Rofi theme matching Eww & Polybar */
+configuration {
+    modi: "drun,run,window";
+    font: "JetBrainsMono Nerd Font 17";
+    show-icons: false;
+    display-drun: "󰀻 Apps";
+    display-run: " Run";
+    display-window: " Win";
+    drun-display-format: "{name}";
+    click-to-exit: true;
+    me-select-entry: "";
+    me-accept-entry: "MousePrimary";
+}
+
+* {
+    base: #1e1e2e;
+    base-glass: rgba(30, 30, 46, 95 %);
+    surface: #313244;
+    surface1: #45475a;
+    text: #cdd6f4;
+    subtext: #a6adc8;
+    blue: #89b4fa;
+    red: #f38ba8;
+    dark: #1e1e2e;
+    transparent: rgba(0, 0, 0, 0 %);
+
+    background-color: @transparent;
+    text-color: @text;
+}
+
+window {
+    width: 720px;
+    background-color: @base-glass;
+    border: 2px;
+    border-color: @surface1;
+    border-radius: 22px;
+    padding: 18px;
+}
+
+mainbox {
+    spacing: 14px;
+    children: [ inputbar, listview, mode-switcher ];
+}
+
+inputbar {
+    children: [ prompt, entry ];
+    spacing: 12px;
+    padding: 14px 18px;
+    background-color: @surface;
+    border: 1px;
+    border-color: @surface1;
+    border-radius: 16px;
+}
+
+prompt, entry {
+    background-color: @transparent;
+}
+
+prompt {
+    text-color: @blue;
+}
+
+entry {
+    placeholder: "Search...";
+    placeholder-color: @subtext;
+    text-color: @text;
+}
+
+listview {
+    lines: 6;
+    columns: 1;
+    fixed-height: false;
+    scrollbar: false;
+    spacing: 10px;
+}
+
+element {
+    padding: 16px 18px;
+    border-radius: 16px;
+    background-color: @surface;
+    border: 1px;
+    border-color: @surface1;
+    text-color: @text;
+}
+
+element normal.normal,
+element alternate.normal {
+    background-color: @surface;
+    border: 1px;
+    border-color: @surface1;
+    text-color: @text;
+}
+
+element normal.active,
+element alternate.active {
+    background-color: @surface;
+    border: 1px;
+    border-color: @blue;
+    text-color: @blue;
+}
+
+element normal.urgent,
+element alternate.urgent {
+    background-color: @surface;
+    border: 1px;
+    border-color: @red;
+    text-color: @red;
+}
+
+element selected,
+element selected.normal,
+element selected.active {
+    background-color: @blue;
+    border: 1px;
+    border-color: @blue;
+    text-color: @dark;
+}
+
+element selected.urgent {
+    background-color: @red;
+    border: 1px;
+    border-color: @red;
+    text-color: @dark;
+}
+
+element-text {
+    background-color: @transparent;
+    text-color: inherit;
+    vertical-align: 0.5;
+}
+
+mode-switcher {
+    spacing: 10px;
+}
+
+button,
+button normal {
+    padding: 12px 16px;
+    border-radius: 14px;
+    background-color: @surface;
+    border: 1px;
+    border-color: @surface1;
+    text-color: @subtext;
+}
+
+button selected {
+    background-color: @blue;
+    border: 1px;
+    border-color: @blue;
+    text-color: @dark;
+}
+
+textbox {
+    padding: 12px 16px;
+    border-radius: 14px;
+    background-color: @surface;
+    text-color: @text;
+}

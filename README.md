@@ -5,7 +5,18 @@
 > [!CAUTION]
 > **Not ready to be used yet.** Expect rough edges.
 
-Turns a fresh Termux install into a **C/C++ dev environment** (with Python, C#, and Lua LSP support) and an opinionated **TUI setup**: zsh, Neovim, tmux, and a Nerd Font.
+Turns a fresh Termux install into a **C/C++ dev environment** (with Python, C#, and Lua LSP support) and an opinionated **TUI + X11/Wayland GUI setup**: zsh, Neovim, tmux, Nerd Font, Sway/LabWC/bspwm, and Quickshell.
+
+## 📁 Repository Layout
+
+```text
+termux_reinstall/
+├── main.py          # Interactive Setup/Configure menu & CLI dispatcher
+├── setup.py         # Core & X11/Wayland pkg / toolchain installer
+├── configure.py     # Builds native binaries/cursors & deploys assets below
+├── daemons/         # Native C daemons (qs_native.c, tgui_fix.c), rish wrapper, helper scripts
+└── dotfiles/        # Zsh/Starship, Tmux, Termux, Lazygit, Neovim, X11, Wayland, & Quickshell configs
+```
 
 ---
 
@@ -43,7 +54,7 @@ If a step fails, the script prints why, carries on, and lists every failed step 
 
 | Option | What it does |
 |--------|--------------|
-| **Zsh** | Installs [Oh My Zsh](https://ohmyz.sh/), `zsh-autosuggestions` + `zsh-syntax-highlighting` (plus `git`, `colored-man-pages`), wires up `zoxide`/`fzf`/`bat`/`yazi` (`y` wrapper)/`fastfetch` (skipped inside `tmux`/Neovim), sets `.NET` env (`~/.dotnet/tools`, `DOTNET_ROOT`, `DOTNET_ROLL_FORWARD=Major`), configures [Starship](https://starship.rs/) (`starship.toml` with `xmake`, C, Python, etc.), installs `~/.local/bin/rish`, and adds aliases |
+| **Zsh** | Installs [Oh My Zsh](https://ohmyz.sh/), `zsh-autosuggestions` + `zsh-syntax-highlighting` (plus `git`, `colored-man-pages`), wires up `zoxide`/`fzf`/`bat`/`yazi` (`y` wrapper)/`fastfetch` (skipped inside `tmux`/Neovim), sets `.NET` env (`~/.dotnet/tools`, `DOTNET_ROOT`, `DOTNET_ROLL_FORWARD=Major`), installs [`dotfiles/shell/starship.toml`](dotfiles/shell/starship.toml) (`xmake`, C, Python, etc.), installs `~/.local/bin/rish`, and adds aliases |
 | **Neovim** | Installs [AstroNvim](https://astronvim.com/) *(recommended)* or [LazyVim](https://www.lazyvim.org/). Existing configs are backed up to `*.bak`. Uses Termux's native `clangd`, `lua-language-server`, `csharp-ls`, `basedpyright`, and `ruff` instead of Mason ([clangd#1944](https://github.com/clangd/clangd/issues/1944)), disables Mason auto-installs, fixes Termux italic comment clipping (`termux_cursor.lua`), and includes `tokyonight` + Snacks colorscheme preview |
 | **Font** | Installs JetBrainsMono Nerd Font (`~/.termux/font.ttf`), Catppuccin Mocha colors (`~/.termux/colors.properties`), and Termux app tweaks (`~/.termux/termux.properties`: `bell-character = ignore`, `hide-soft-keyboard-on-startup`, `volume-keys = volume`, `extra-keys = []`, `disable-hardware-keyboard-shortcuts = false`, `back-key=escape`) |
 | **Tmux** | Writes `~/.tmux.conf` (Catppuccin Mocha bar, mouse support, `Ctrl-a`/`Ctrl-b` prefix, `\|`/`-` splits, `Alt+Arrow` pane switching, `vi` copy mode with Android clipboard via `termux-clipboard-set`) |

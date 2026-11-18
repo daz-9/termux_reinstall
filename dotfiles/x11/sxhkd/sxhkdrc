@@ -1,0 +1,101 @@
+# i3-style keybinds for bspwm ($mod = Alt or Super/Command)
+
+# Terminal (xfce4-terminal for fast 2D rendering on Mali; Shift+Return for VirGL Alacritty)
+{alt,super} + Return
+	if command -v xfce4-terminal >/dev/null 2>&1; then exec xfce4-terminal; else exec alacritty; fi
+
+{alt,super} + shift + Return
+	GALLIUM_DRIVER=virpipe alacritty
+
+# App launcher (i3: $mod+d / $mod+Shift+d)
+{alt,super} + d
+	rofi -show drun
+
+{alt,super} + shift + d
+	rofi -show run
+
+# Kill / force-kill focused window (i3: $mod+Shift+q)
+{alt,super} + shift + q
+	bspc node -c
+
+{alt,super} + shift + ctrl + q
+	bspc node -k
+
+# Focus window (i3: $mod + h/j/k/l or arrows)
+# NOTE: Separate alt/super blocks to work around sxhkd multi-brace pairing truncation.
+alt + {h,j,k,l,Left,Down,Up,Right}
+	bspc node -f {west,south,north,east,west,south,north,east}
+
+super + {h,j,k,l,Left,Down,Up,Right}
+	bspc node -f {west,south,north,east,west,south,north,east}
+
+# Move/swap window (i3: $mod+Shift + h/j/k/l or arrows)
+alt + shift + {h,j,k,l,Left,Down,Up,Right}
+	bspc node -s {west,south,north,east,west,south,north,east}
+
+super + shift + {h,j,k,l,Left,Down,Up,Right}
+	bspc node -s {west,south,north,east,west,south,north,east}
+
+# Split direction (i3-style: $mod+v vertical/below, $mod+b horizontal/right)
+alt + {v,b}
+	bspc node -p {south,east}
+
+super + {v,b}
+	bspc node -p {south,east}
+
+{alt,super} + ctrl + space
+	bspc node -p cancel
+
+# Fullscreen toggle (i3: $mod+f)
+{alt,super} + f
+	bspc node -t ~fullscreen
+
+# Floating toggle (i3: $mod+Shift+space)
+{alt,super} + shift + space
+	bspc node -t ~floating
+
+# Layout toggle (i3: $mod+w monocle, $mod+e tiled)
+{alt,super} + w
+	bspc desktop -l next
+
+{alt,super} + e
+	bspc desktop -l tiled
+
+# Resize focused window ($mod+Ctrl + h/j/k/l)
+{alt,super} + ctrl + h
+	bspc node -z right -20 0 || bspc node -z left 20 0
+
+{alt,super} + ctrl + l
+	bspc node -z right 20 0 || bspc node -z left -20 0
+
+{alt,super} + ctrl + k
+	bspc node -z bottom 0 -20 || bspc node -z top 0 20
+
+{alt,super} + ctrl + j
+	bspc node -z bottom 0 20 || bspc node -z top 0 -20
+
+# Switch to workspace (i3: $mod+1..6)
+alt + {1,2,3,4,5,6}
+	bspc desktop -f '^{1,2,3,4,5,6}'
+
+super + {1,2,3,4,5,6}
+	bspc desktop -f '^{1,2,3,4,5,6}'
+
+# Move window to workspace (i3: $mod+Shift+1..6)
+alt + shift + {1,2,3,4,5,6}
+	bspc node -d '^{1,2,3,4,5,6}'
+
+super + shift + {1,2,3,4,5,6}
+	bspc node -d '^{1,2,3,4,5,6}'
+
+# Reload sxhkd (i3: $mod+Shift+c)
+{alt,super} + shift + c
+	pkill -USR1 -x sxhkd
+
+# Restart bspwm (i3: $mod+Shift+r)
+{alt,super} + shift + r
+	bspc wm -r
+
+# Exit bspwm session (i3: $mod+Shift+e)
+{alt,super} + shift + e
+	bspc quit

@@ -1,0 +1,100 @@
+<?xml version="1.0"?>
+<labwc_config>
+  <core>
+    <gap>12</gap>
+  </core>
+  <placement>
+    <policy>center</policy>
+  </placement>
+  <desktops>
+    <popupTime>800</popupTime>
+    <names>
+      <name>1</name>
+      <name>2</name>
+      <name>3</name>
+      <name>4</name>
+      <name>5</name>
+      <name>6</name>
+    </names>
+  </desktops>
+  <theme>
+    <name>Catppuccin-Mocha</name>
+    <cornerRadius>16</cornerRadius>
+    <font name="JetBrainsMono Nerd Font" size="13" />
+  </theme>
+  <focus>
+    <followMouse>yes</followMouse>
+  </focus>
+  <keyboard>
+    <default />
+    <keybind key="A-Return">
+      <action name="Execute" command="foot" />
+    </keybind>
+    <keybind key="W-Return">
+      <action name="Execute" command="foot" />
+    </keybind>
+    <keybind key="A-d">
+      <action name="Execute" command="rofi -show drun" />
+    </keybind>
+    <keybind key="W-d">
+      <action name="Execute" command="rofi -show drun" />
+    </keybind>
+    <keybind key="A-Tab">
+      <action name="NextWindow" />
+    </keybind>
+    <keybind key="A-q">
+      <action name="Close" />
+    </keybind>
+    <keybind key="A-S-q">
+      <action name="Close" />
+    </keybind>
+    <keybind key="A-f">
+      <action name="ToggleFullscreen" />
+    </keybind>
+    <keybind key="A-m">
+      <action name="ToggleMaximize" />
+    </keybind>
+    <keybind key="A-1">
+      <action name="GoToDesktop" to="1" />
+    </keybind>
+    <keybind key="A-2">
+      <action name="GoToDesktop" to="2" />
+    </keybind>
+    <keybind key="A-3">
+      <action name="GoToDesktop" to="3" />
+    </keybind>
+    <keybind key="A-4">
+      <action name="GoToDesktop" to="4" />
+    </keybind>
+    <keybind key="A-5">
+      <action name="GoToDesktop" to="5" />
+    </keybind>
+    <keybind key="A-6">
+      <action name="GoToDesktop" to="6" />
+    </keybind>
+    <keybind key="A-S-1">
+      <action name="SendToDesktop" to="1" />
+    </keybind>
+    <keybind key="A-S-2">
+      <action name="SendToDesktop" to="2" />
+    </keybind>
+    <keybind key="A-S-3">
+      <action name="SendToDesktop" to="3" />
+    </keybind>
+    <keybind key="A-S-4">
+      <action name="SendToDesktop" to="4" />
+    </keybind>
+    <keybind key="A-S-5">
+      <action name="SendToDesktop" to="5" />
+    </keybind>
+    <keybind key="A-S-6">
+      <action name="SendToDesktop" to="6" />
+    </keybind>
+    <keybind key="A-S-r">
+      <action name="Reconfigure" />
+    </keybind>
+    <keybind key="A-S-e">
+      <action name="Exit" />
+    </keybind>
+  </keyboard>
+</labwc_config>

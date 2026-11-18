@@ -1,0 +1,4 @@
+[Icon Theme]
+Name=TouchDot-Mocha
+Comment=iPadOS-style translucent Catppuccin Mocha touch-dot cursor
+Inherits=Adwaita

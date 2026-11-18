@@ -1,0 +1,5 @@
+#!/data/data/com.termux/files/usr/bin/sh
+if command -v swaybg >/dev/null 2>&1 && [ -f "$HOME/.local/share/wallpapers/wallpaper.jpg" ]; then
+  swaybg -i "$HOME/.local/share/wallpapers/wallpaper.jpg" -m fill >/dev/null 2>&1 &
+fi
+"${XDG_CONFIG_HOME:-$HOME/.config}/quickshell/launch-wayland.sh" &

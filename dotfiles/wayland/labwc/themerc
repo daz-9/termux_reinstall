@@ -1,0 +1,15 @@
+border.width: 2
+padding.width: 6
+padding.height: 6
+window.active.title.bg.color: #1e1e2e
+window.active.label.text.color: #cdd6f4
+window.active.border.color: #89b4fa
+window.inactive.title.bg.color: #181825
+window.inactive.label.text.color: #a6adc8
+window.inactive.border.color: #313244
+window.active.button.unpressed.image.color: #cdd6f4
+window.inactive.button.unpressed.image.color: #a6adc8
+osd.bg.color: #1e1e2e
+osd.border.color: #45475a
+osd.border.width: 2
+osd.label.text.color: #cdd6f4

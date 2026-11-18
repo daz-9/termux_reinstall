@@ -1,0 +1,22 @@
+#!/data/data/com.termux/files/usr/bin/sh
+# Shizuku rish wrapper hardened for Android 14+ (read-only dex + clean LD env)
+PREFIX_DIR="${PREFIX:-/data/data/com.termux/files/usr}"
+RISH_DEX="$PREFIX_DIR/share/rish-shizuku.dex"
+
+if [ ! -f "$RISH_DEX" ]; then
+    echo "rish: $RISH_DEX not found (install with: pkg install rish-shizuku)" >&2
+    exit 127
+fi
+
+# Android 14+ aborts app_process with SIGABRT if the dex file is writable by owner.
+if [ -w "$RISH_DEX" ]; then
+    chmod 0400 "$RISH_DEX" || exit $?
+fi
+
+unset LD_LIBRARY_PATH LD_PRELOAD
+export RISH_APPLICATION_ID="${RISH_APPLICATION_ID:-com.termux}"
+exec /system/bin/app_process \
+    -Djava.class.path="$RISH_DEX" \
+    /system/bin \
+    --nice-name=rish \
+    rikka.shizuku.shell.ShizukuShellLoader "${@}"
