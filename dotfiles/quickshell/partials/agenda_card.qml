@@ -23,7 +23,7 @@
                                         spacing: 12
                                         Text {
                                             anchors.verticalCenter: parent.verticalCenter
-                                            text: "\U000f039a"
+                                            text: "󰎚"
                                             color: root.colMauve
                                             font.family: root.uiFont
                                             font.pixelSize: 28

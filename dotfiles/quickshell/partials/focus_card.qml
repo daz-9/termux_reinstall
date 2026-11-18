@@ -17,7 +17,7 @@
                                             spacing: 12
                                             Text {
                                                 anchors.verticalCenter: parent.verticalCenter
-                                                text: root.focusDnd ? "\U000f009b" : "\U000f009a"
+                                                text: root.focusDnd ? "󰂛" : "󰂚"
                                                 color: root.focusDnd ? root.colMauve : (root.focusAvailable ? root.colTeal : root.colPeach)
                                                 font.family: root.uiFont
                                                 font.pixelSize: 38

@@ -22,7 +22,7 @@
                                         spacing: 12
                                         Text {
                                             anchors.verticalCenter: parent.verticalCenter
-                                            text: "\U000f00ed"
+                                            text: "󰃭"
                                             color: root.colBlue
                                             font.family: root.uiFont
                                             font.pixelSize: 28
@@ -53,7 +53,7 @@
                                             border.width: 1
                                             Text {
                                                 anchors.centerIn: parent
-                                                text: "\U000f0141"
+                                                text: "󰅁"
                                                 color: prevMonthArea.pressed ? root.colDark : root.colSubtext
                                                 font.family: root.uiFont
                                                 font.pixelSize: 22
@@ -73,7 +73,7 @@
                                             border.width: 1
                                             Text {
                                                 anchors.centerIn: parent
-                                                text: "\U000f0142"
+                                                text: "󰅂"
                                                 color: nextMonthArea.pressed ? root.colDark : root.colSubtext
                                                 font.family: root.uiFont
                                                 font.pixelSize: 22
