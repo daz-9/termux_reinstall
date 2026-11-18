@@ -4014,6 +4014,270 @@ _QS_MEDIA_CARD = """                        // Android MediaSession Control Card
                         }
 """
 
+QUICKSHELL_WEATHER_PY = """#!/data/data/com.termux/files/usr/bin/python3
+\"\"\"Fetch current weather exclusively for İzmir / Karşıyaka via Open-Meteo.\"\"\"
+
+import json
+import os
+import sys
+import time
+import urllib.error
+import urllib.request
+
+# Locked coordinates for İzmir / Karşıyaka only
+LATITUDE = 38.45772
+LONGITUDE = 27.1142
+LOCATION_LABEL = "İzmir/Karşıyaka"
+API_URL = (
+    f"https://api.open-meteo.com/v1/forecast"
+    f"?latitude={LATITUDE}&longitude={LONGITUDE}"
+    "&current=temperature_2m,apparent_temperature,relative_humidity_2m,is_day,weather_code,wind_speed_10m"
+    "&timezone=Europe%2FIstanbul"
+)
+CACHE_PATH = os.path.expanduser("~/.cache/quickshell/weather-karsiyaka.json")
+
+WMO_MAP = {
+    0: ("Clear Sky", "\\U000f0599", "\\U000f0594", "peach", "blue"),
+    1: ("Mostly Clear", "\\U000f0595", "\\U000f0594", "peach", "blue"),
+    2: ("Partly Cloudy", "\\U000f0595", "\\U000f0595", "peach", "subtext"),
+    3: ("Overcast", "\\U000f0590", "\\U000f0590", "subtext", "subtext"),
+    45: ("Foggy", "\\U000f0591", "\\U000f0591", "subtext", "subtext"),
+    48: ("Rime Fog", "\\U000f0591", "\\U000f0591", "subtext", "subtext"),
+    51: ("Light Drizzle", "\\U000f0597", "\\U000f0597", "blue", "blue"),
+    53: ("Drizzle", "\\U000f0597", "\\U000f0597", "blue", "blue"),
+    55: ("Dense Drizzle", "\\U000f0597", "\\U000f0597", "blue", "blue"),
+    56: ("Freezing Drizzle", "\\U000f0597", "\\U000f0597", "teal", "teal"),
+    57: ("Freezing Drizzle", "\\U000f0597", "\\U000f0597", "teal", "teal"),
+    61: ("Light Rain", "\\U000f0597", "\\U000f0597", "blue", "blue"),
+    63: ("Rain", "\\U000f0597", "\\U000f0597", "blue", "blue"),
+    65: ("Heavy Rain", "\\U000f0596", "\\U000f0596", "blue", "blue"),
+    66: ("Freezing Rain", "\\U000f0597", "\\U000f0597", "teal", "teal"),
+    67: ("Heavy Freezing Rain", "\\U000f0596", "\\U000f0596", "teal", "teal"),
+    71: ("Light Snow", "\\U000f0598", "\\U000f0598", "text", "text"),
+    73: ("Snow", "\\U000f0598", "\\U000f0598", "text", "text"),
+    75: ("Heavy Snow", "\\U000f0598", "\\U000f0598", "text", "text"),
+    77: ("Snow Grains", "\\U000f0598", "\\U000f0598", "text", "text"),
+    80: ("Light Showers", "\\U000f0597", "\\U000f0597", "blue", "blue"),
+    81: ("Showers", "\\U000f0597", "\\U000f0597", "blue", "blue"),
+    82: ("Heavy Showers", "\\U000f0596", "\\U000f0596", "blue", "blue"),
+    85: ("Snow Showers", "\\U000f0598", "\\U000f0598", "text", "text"),
+    86: ("Heavy Snow Showers", "\\U000f0598", "\\U000f0598", "text", "text"),
+    95: ("Thunderstorm", "\\U000f0593", "\\U000f0593", "mauve", "mauve"),
+    96: ("Thunderstorm + Hail", "\\U000f0593", "\\U000f0593", "mauve", "mauve"),
+    99: ("Severe Thunderstorm", "\\U000f0593", "\\U000f0593", "red", "red"),
+}
+
+
+def _format_payload(cur: dict, stale: bool = False) -> dict:
+    temp = cur.get("temperature_2m")
+    feels = cur.get("apparent_temperature")
+    code = int(cur.get("weather_code", 0) or 0)
+    is_day = bool(cur.get("is_day", 1))
+    hum = cur.get("relative_humidity_2m")
+    wind = cur.get("wind_speed_10m")
+
+    cond, icon_d, icon_n, tone_d, tone_n = WMO_MAP.get(
+        code, ("Cloudy", "\\U000f0590", "\\U000f0590", "subtext", "subtext")
+    )
+    icon = icon_d if is_day else icon_n
+    tone = tone_d if is_day else tone_n
+
+    temp_str = f"{round(float(temp))}°C" if temp is not None else "--°C"
+    feels_str = f"Feels {round(float(feels))}°C" if feels is not None else ""
+    extra = []
+    if feels_str:
+        extra.append(feels_str)
+    if wind is not None:
+        extra.append(f"{round(float(wind))} km/h")
+    if hum is not None and not extra:
+        extra.append(f"{int(hum)}%")
+
+    detail = cond if not extra else f"{cond} · {' · '.join(extra)}"
+    if stale:
+        detail = f"{detail} (cached)"
+
+    return {
+        "ok": True,
+        "location": LOCATION_LABEL,
+        "temp": temp_str,
+        "cond": cond,
+        "detail": detail,
+        "icon": icon,
+        "tone": tone,
+        "ts": int(time.time()),
+    }
+
+
+def main() -> int:
+    try:
+        req = urllib.request.Request(API_URL, headers={"User-Agent": "quickshell-weather/1.0"})
+        with urllib.request.urlopen(req, timeout=5.0) as resp:
+            raw = json.loads(resp.read().decode("utf-8"))
+        cur = raw.get("current") or {}
+        if not cur:
+            raise ValueError("missing current weather")
+        payload = _format_payload(cur, stale=False)
+        try:
+            os.makedirs(os.path.dirname(CACHE_PATH), exist_ok=True)
+            with open(CACHE_PATH, "w") as f:
+                json.dump({"current": cur, "fetched_at": int(time.time())}, f)
+        except OSError:
+            pass
+        print(json.dumps(payload), flush=True)
+        return 0
+    except (OSError, urllib.error.URLError, ValueError, json.JSONDecodeError):
+        if os.path.exists(CACHE_PATH):
+            try:
+                with open(CACHE_PATH) as f:
+                    cached = json.load(f)
+                payload = _format_payload(cached.get("current") or {}, stale=True)
+                print(json.dumps(payload), flush=True)
+                return 0
+            except (OSError, ValueError, json.JSONDecodeError):
+                pass
+        print(json.dumps({
+            "ok": False,
+            "location": LOCATION_LABEL,
+            "temp": "--°C",
+            "cond": "Offline",
+            "detail": "Tap to retry Open-Meteo",
+            "icon": "\\U000f0590",
+            "tone": "subtext",
+            "ts": 0,
+        }), flush=True)
+        return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
+"""
+
+_QS_WEATHER_PROPS = """    property string weatherTemp: "--°C"
+    property string weatherDetail: "Loading İzmir/Karşıyaka..."
+    property string weatherLocation: "İzmir/Karşıyaka"
+    property string weatherIcon: "\\U000f0599"
+    property string weatherTone: "peach"
+    property real lastWeatherMs: 0
+"""
+
+_QS_WEATHER_FN = """    function weatherColor(tone) {
+        if (tone === "blue") return root.colBlue;
+        if (tone === "teal") return root.colTeal;
+        if (tone === "mauve") return root.colMauve;
+        if (tone === "red") return root.colRed;
+        if (tone === "text") return root.colText;
+        if (tone === "subtext") return root.colSubtext;
+        return root.colPeach;
+    }
+
+    function refreshWeather() {
+        if (!weatherProc.running) {
+            weatherProc.running = true;
+        }
+    }
+
+    function refreshWeatherIfStale() {
+        const now = Date.now();
+        if (root.lastWeatherMs === 0 || (now - root.lastWeatherMs) > 300000) {
+            root.refreshWeather();
+        }
+    }
+"""
+
+_QS_WEATHER_PROCS = """    Process {
+        id: weatherProc
+        command: ["python3", Quickshell.env("HOME") + "/.config/quickshell/scripts/weather.py"]
+        running: false
+        stdout: StdioCollector {
+            onStreamFinished: {
+                try {
+                    const d = JSON.parse((this.text || "").trim() || "{}");
+                    if (d.temp !== undefined) root.weatherTemp = String(d.temp);
+                    if (d.detail !== undefined) root.weatherDetail = String(d.detail);
+                    if (d.location !== undefined) root.weatherLocation = String(d.location);
+                    if (d.icon !== undefined) root.weatherIcon = String(d.icon);
+                    if (d.tone !== undefined) root.weatherTone = String(d.tone);
+                    if (d.ok) root.lastWeatherMs = Date.now();
+                } catch (e) {}
+            }
+        }
+    }
+
+    Timer {
+        interval: 1400
+        running: true
+        repeat: false
+        onTriggered: root.refreshWeather()
+    }
+
+    Timer {
+        interval: 900000
+        running: true
+        repeat: true
+        onTriggered: root.refreshWeather()
+    }
+"""
+
+_QS_WEATHER_CARD = """                            Rectangle {
+                                Layout.fillWidth: true
+                                implicitHeight: weatherCol.implicitHeight + 40
+                                radius: 20
+                                color: weatherCardArea.pressed ? root.colSurface1 : root.colSurface
+                                border.color: root.colSurface1
+                                border.width: 1
+
+                                Column {
+                                    id: weatherCol
+                                    anchors.fill: parent
+                                    anchors.margins: 20
+                                    spacing: 8
+                                    RowLayout {
+                                        width: parent.width
+                                        Row {
+                                            spacing: 12
+                                            Text {
+                                                anchors.verticalCenter: parent.verticalCenter
+                                                text: root.weatherIcon
+                                                color: root.weatherColor(root.weatherTone)
+                                                font.family: root.uiFont
+                                                font.pixelSize: 38
+                                            }
+                                            Text {
+                                                anchors.verticalCenter: parent.verticalCenter
+                                                text: root.weatherTemp
+                                                color: root.colText
+                                                font.family: root.uiFont
+                                                font.pixelSize: 32
+                                                font.bold: true
+                                            }
+                                        }
+                                        Item { Layout.fillWidth: true }
+                                        Text {
+                                            text: root.weatherLocation
+                                            color: root.colBlue
+                                            font.family: root.uiFont
+                                            font.pixelSize: 16
+                                            font.bold: true
+                                        }
+                                    }
+                                    Text {
+                                        width: parent.width
+                                        elide: Text.ElideRight
+                                        text: root.weatherDetail
+                                        color: root.colSubtext
+                                        font.family: root.uiFont
+                                        font.pixelSize: 20
+                                    }
+                                }
+
+                                MouseArea {
+                                    id: weatherCardArea
+                                    anchors.fill: parent
+                                    onClicked: root.refreshWeather()
+                                }
+                            }
+"""
+
 QUICKSHELL_QML = """import Quickshell
 import Quickshell.Io
 import QtQuick
@@ -4040,6 +4304,7 @@ ShellRoot {
     property bool widgetsActive: false
 __ANDROID_STATUS_PROPS__
 __MEDIA_PROPS__
+__WEATHER_PROPS__
     readonly property color colBase: "#e61e1e2e"
     readonly property color colPopupBase: "#f21e1e2e"
     readonly property color colSurface: "#313244"
@@ -4076,6 +4341,7 @@ __MEDIA_PROPS__
 
 __ANDROID_STATUS_FN__
 __MEDIA_FN__
+__WEATHER_FN__
     function toggleWidgets() {
         if (root.widgetsOpen) {
             closeWidgets();
@@ -4086,6 +4352,7 @@ __MEDIA_FN__
             root.widgetsOpen = true;
             root.refreshAndroidStatus();
             root.refreshMedia();
+            root.refreshWeatherIfStale();
             syncWatcher();
         }
     }
@@ -4237,6 +4504,7 @@ __MEDIA_FN__
 
 __ANDROID_STATUS_PROCS__
 __MEDIA_PROCS__
+__WEATHER_PROCS__
     Timer {
         interval: 4000
         running: true
@@ -4662,45 +4930,7 @@ __MEDIA_PROCS__
                             Layout.fillWidth: true
                             spacing: 18
 
-                            Rectangle {
-                                Layout.fillWidth: true
-                                implicitHeight: weatherCol.implicitHeight + 40
-                                radius: 20
-                                color: root.colSurface
-                                border.color: root.colSurface1
-                                border.width: 1
-
-                                Column {
-                                    id: weatherCol
-                                    anchors.fill: parent
-                                    anchors.margins: 20
-                                    spacing: 8
-                                    Row {
-                                        spacing: 12
-                                        Text {
-                                            anchors.verticalCenter: parent.verticalCenter
-                                            text: "\U000f0599"
-                                            color: root.colPeach
-                                            font.family: root.uiFont
-                                            font.pixelSize: 38
-                                        }
-                                        Text {
-                                            anchors.verticalCenter: parent.verticalCenter
-                                            text: "22°C"
-                                            color: root.colText
-                                            font.family: root.uiFont
-                                            font.pixelSize: 32
-                                            font.bold: true
-                                        }
-                                    }
-                                    Text {
-                                        text: "Clear Sky · Feels 21°C"
-                                        color: root.colSubtext
-                                        font.family: root.uiFont
-                                        font.pixelSize: 21
-                                    }
-                                }
-                            }
+__WEATHER_CARD__
 
                             Rectangle {
                                 Layout.fillWidth: true
@@ -5057,6 +5287,7 @@ ShellRoot {
     property bool widgetsActive: false
 __ANDROID_STATUS_PROPS__
 __MEDIA_PROPS__
+__WEATHER_PROPS__
     readonly property color colBase: "#e61e1e2e"
     readonly property color colPopupBase: "#f21e1e2e"
     readonly property color colSurface: "#313244"
@@ -5102,6 +5333,7 @@ __MEDIA_PROPS__
 
 __ANDROID_STATUS_FN__
 __MEDIA_FN__
+__WEATHER_FN__
     function findFocusedTitle(node) {
         if (!node) return "";
         if (node.focused && node.name && node.type !== "workspace" && node.type !== "output" && node.type !== "root") {
@@ -5125,6 +5357,7 @@ __MEDIA_FN__
             root.widgetsOpen = true;
             root.refreshAndroidStatus();
             root.refreshMedia();
+            root.refreshWeatherIfStale();
         }
     }
 
@@ -5288,6 +5521,7 @@ __MEDIA_FN__
 
 __ANDROID_STATUS_PROCS__
 __MEDIA_PROCS__
+__WEATHER_PROCS__
     Timer {
         interval: 1000
         running: true
@@ -6056,45 +6290,7 @@ __MEDIA_PROCS__
                             Layout.fillWidth: true
                             spacing: 18
 
-                            Rectangle {
-                                Layout.fillWidth: true
-                                implicitHeight: weatherCol.implicitHeight + 40
-                                radius: 20
-                                color: root.colSurface
-                                border.color: root.colSurface1
-                                border.width: 1
-
-                                Column {
-                                    id: weatherCol
-                                    anchors.fill: parent
-                                    anchors.margins: 20
-                                    spacing: 8
-                                    Row {
-                                        spacing: 12
-                                        Text {
-                                            anchors.verticalCenter: parent.verticalCenter
-                                            text: "\U000f0599"
-                                            color: root.colPeach
-                                            font.family: root.uiFont
-                                            font.pixelSize: 38
-                                        }
-                                        Text {
-                                            anchors.verticalCenter: parent.verticalCenter
-                                            text: "22°C"
-                                            color: root.colText
-                                            font.family: root.uiFont
-                                            font.pixelSize: 32
-                                            font.bold: true
-                                        }
-                                    }
-                                    Text {
-                                        text: "Clear Sky · Feels 21°C"
-                                        color: root.colSubtext
-                                        font.family: root.uiFont
-                                        font.pixelSize: 21
-                                    }
-                                }
-                            }
+__WEATHER_CARD__
 
                             Rectangle {
                                 Layout.fillWidth: true
@@ -7476,6 +7672,10 @@ def configure_x11() -> int:
             .replace("__MEDIA_FN__", _QS_MEDIA_FN)
             .replace("__MEDIA_PROCS__", _QS_MEDIA_PROCS)
             .replace("__MEDIA_CARD__", _QS_MEDIA_CARD)
+            .replace("__WEATHER_PROPS__", _QS_WEATHER_PROPS)
+            .replace("__WEATHER_FN__", _QS_WEATHER_FN)
+            .replace("__WEATHER_PROCS__", _QS_WEATHER_PROCS)
+            .replace("__WEATHER_CARD__", _QS_WEATHER_CARD)
         )
 
     files = [
@@ -7503,6 +7703,7 @@ def configure_x11() -> int:
         ("~/.config/quickshell/scripts/wl_workspaces.py", QUICKSHELL_WL_WORKSPACES_PY, 0o755),
         ("~/.config/quickshell/scripts/android_status.py", QUICKSHELL_ANDROID_STATUS_PY, 0o755),
         ("~/.config/quickshell/scripts/media_control.py", QUICKSHELL_MEDIA_CONTROL_PY, 0o755),
+        ("~/.config/quickshell/scripts/weather.py", QUICKSHELL_WEATHER_PY, 0o755),
         ("~/.config/sway/config", SWAY_CONFIG, 0o644),
         ("~/.config/labwc/rc.xml", LABWC_RC_XML, 0o644),
         ("~/.config/labwc/themerc", LABWC_THEMERC, 0o644),
