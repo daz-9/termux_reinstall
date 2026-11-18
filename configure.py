@@ -122,6 +122,7 @@ def dispatch(choices: tuple[str, ...]) -> int:
         "tmux": lambda: configure_tmux(),
         "git": lambda: configure_git(),
         "x11": lambda: configure_x11(),
+        "rish": lambda: configure_rish(),
     })
 
 
@@ -162,6 +163,7 @@ def configure_zsh() -> int:
     _append_zshrc_block(ZSH_CLI_TOOLS_MARKER, ZSH_CLI_TOOLS, "CLI tools (zoxide, fzf, bat)")
     configure_starship()
     _append_zshrc_block(ZSH_STARSHIP_MARKER, ZSH_STARSHIP, "starship prompt")
+    configure_rish()
     return 0
 
 
@@ -7069,6 +7071,61 @@ def _build_tgui_fix_shim() -> None:
         failures.append("building libtgui_fix.so")
 
 
+RISH_WRAPPER_SH = """#!/data/data/com.termux/files/usr/bin/sh
+# Shizuku rish wrapper hardened for Android 14+ (read-only dex + clean LD env)
+PREFIX_DIR="${PREFIX:-/data/data/com.termux/files/usr}"
+RISH_DEX="$PREFIX_DIR/share/rish-shizuku.dex"
+
+if [ ! -f "$RISH_DEX" ]; then
+    echo "rish: $RISH_DEX not found (install with: pkg install rish-shizuku)" >&2
+    exit 127
+fi
+
+# Android 14+ aborts app_process with SIGABRT if the dex file is writable by owner.
+if [ -w "$RISH_DEX" ]; then
+    chmod 0400 "$RISH_DEX" || exit $?
+fi
+
+unset LD_LIBRARY_PATH LD_PRELOAD
+export RISH_APPLICATION_ID="${RISH_APPLICATION_ID:-com.termux}"
+exec /system/bin/app_process \\
+    -Djava.class.path="$RISH_DEX" \\
+    /system/bin \\
+    --nice-name=rish \\
+    rikka.shizuku.shell.ShizukuShellLoader "${@}"
+"""
+
+
+def configure_rish() -> int:
+    """Install/harden rish-shizuku and write ~/.local/bin/rish wrapper."""
+    prefix = os.environ.get("PREFIX", "/data/data/com.termux/files/usr")
+    rish_dex = os.path.join(prefix, "share", "rish-shizuku.dex")
+    if not os.path.exists(rish_dex):
+        run("pkg install rish-shizuku -y", "installing rish-shizuku")
+
+    if os.path.exists(rish_dex):
+        try:
+            if (os.stat(rish_dex).st_mode & 0o777) & 0o222:
+                os.chmod(rish_dex, 0o400)
+                print("[+] set read-only 0400 on rish-shizuku.dex")
+        except OSError as e:
+            print(f"[-] chmod 0400 on rish-shizuku.dex failed: {e}")
+            failures.append("hardening rish-shizuku.dex")
+
+    wrapper_path = os.path.expanduser("~/.local/bin/rish")
+    try:
+        os.makedirs(os.path.dirname(wrapper_path), exist_ok=True)
+        with open(wrapper_path, "w") as f:
+            f.write(RISH_WRAPPER_SH)
+        os.chmod(wrapper_path, 0o755)
+        print("[+] wrote ~/.local/bin/rish")
+    except OSError as e:
+        print(f"[-] writing ~/.local/bin/rish failed: {e}")
+        failures.append("writing ~/.local/bin/rish")
+        return 1
+    return 0
+
+
 def configure_x11() -> int:
     """Write minimal bspwm, sxhkd, polybar, picom, rofi, xfce4-terminal configs and ~/start-x11.sh."""
     wall_dir = os.path.expanduser("~/.local/share/wallpapers")
@@ -7082,17 +7139,10 @@ def configure_x11() -> int:
 
     _install_touch_cursor_theme()
     _build_tgui_fix_shim()
+    configure_rish()
 
     prefix = os.environ.get("PREFIX", "/data/data/com.termux/files/usr")
     prefix_bin = os.path.join(prefix, "bin")
-    rish_dex = os.path.join(prefix, "share", "rish-shizuku.dex")
-    if os.path.exists(rish_dex):
-        try:
-            if (os.stat(rish_dex).st_mode & 0o777) & 0o222:
-                os.chmod(rish_dex, 0o400)
-                print("[+] set read-only 0400 on rish-shizuku.dex")
-        except OSError:
-            pass
 
     def _render_qs(tpl: str) -> str:
         return (
