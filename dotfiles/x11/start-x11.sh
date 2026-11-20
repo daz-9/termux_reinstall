@@ -2,6 +2,7 @@
 set -u
 
 PREFIX="${PREFIX:-/data/data/com.termux/files/usr}"
+export PATH="$HOME/.local/bin:$PATH"
 export DISPLAY=":0"
 export XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-$PREFIX/tmp}"
 export TMPDIR="${TMPDIR:-$XDG_RUNTIME_DIR}"
@@ -11,9 +12,15 @@ export XCURSOR_THEME="TouchDot-Mocha"
 export XCURSOR_SIZE="32"
 
 VIRGL_PID=""
+kill_procs() {
+  for proc in "$@"; do
+    pkill -x "$proc" 2>/dev/null || true
+  done
+}
+
 cleanup() {
   eww kill >/dev/null 2>&1 || true
-  pkill -x eww quickshell qs-native polybar fastcompmgr picom sxhkd bspwm termux-x11 2>/dev/null || true
+  kill_procs eww quickshell qs-native polybar fastcompmgr picom sxhkd bspwm termux-x11
   [ -f "$TMPDIR/hide-cursor.pid" ] && kill "$(cat "$TMPDIR/hide-cursor.pid")" 2>/dev/null || true
   [ -f "$TMPDIR/eww-watch.pid" ] && kill "$(cat "$TMPDIR/eww-watch.pid")" 2>/dev/null || true
   [ -f "$TMPDIR/qs-watch.pid" ] && kill "$(cat "$TMPDIR/qs-watch.pid")" 2>/dev/null || true
@@ -27,7 +34,7 @@ eww kill >/dev/null 2>&1 || true
 [ -f "$TMPDIR/eww-watch.pid" ] && kill "$(cat "$TMPDIR/eww-watch.pid")" 2>/dev/null || true
 [ -f "$TMPDIR/qs-watch.pid" ] && kill "$(cat "$TMPDIR/qs-watch.pid")" 2>/dev/null || true
 rm -f "$TMPDIR/eww-watch.pid" "$TMPDIR/qs-watch.pid"
-pkill -x eww quickshell qs-native polybar fastcompmgr picom sxhkd bspwm termux-x11 virgl_test_serv 2>/dev/null || true
+kill_procs eww quickshell qs-native polybar fastcompmgr picom sxhkd bspwm termux-x11 virgl_test_serv
 [ -f "$TMPDIR/hide-cursor.pid" ] && kill "$(cat "$TMPDIR/hide-cursor.pid")" 2>/dev/null || true
 pkill -f '[v]irgl_test_server_android' 2>/dev/null || true
 pkill -f "com.termux.x11" 2>/dev/null || true

@@ -1,0 +1,18 @@
+[package]
+name = "qs-native"
+version = "0.1.0"
+edition = "2021"
+description = "Native Termux/Quickshell/Polybar daemon rewrite in Rust"
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+# Uncomment when implementing `hide-cursor` and `submenu-watch` (pure-Rust X11):
+# x11rb = { version = "0.13", default-features = false, features = ["xfixes", "xinput"] }
+
+[profile.release]
+opt-level = "z"
+lto = true
+codegen-units = 1
+strip = true
+panic = "abort"

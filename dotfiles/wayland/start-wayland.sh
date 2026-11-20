@@ -2,6 +2,7 @@
 set -u
 
 PREFIX="${PREFIX:-/data/data/com.termux/files/usr}"
+export PATH="$HOME/.local/bin:$PATH"
 export DISPLAY="${DISPLAY:-:0}"
 export TERMUX_X11_DISPLAY="$DISPLAY"
 export XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-$PREFIX/tmp}"
@@ -36,15 +37,21 @@ else
   export WLR_RENDERER="pixman"
 fi
 
+kill_procs() {
+  for proc in "$@"; do
+    pkill -x "$proc" 2>/dev/null || true
+  done
+}
+
 cleanup() {
-  pkill -x quickshell qs-native swaybg sway labwc polybar eww sxhkd bspwm termux-x11 2>/dev/null || true
+  kill_procs quickshell qs-native swaybg sway labwc polybar eww sxhkd bspwm termux-x11
   rm -f "$XDG_RUNTIME_DIR/.X11-unix/X0" "$XDG_RUNTIME_DIR/wayland-0" "$XDG_RUNTIME_DIR/wayland-0.lock"
 }
 trap cleanup EXIT INT TERM
 
 # Clean stale sessions before launching
 eww kill >/dev/null 2>&1 || true
-pkill -x quickshell qs-native swaybg sway labwc polybar eww fastcompmgr picom sxhkd bspwm termux-x11 2>/dev/null || true
+kill_procs quickshell qs-native swaybg sway labwc polybar eww fastcompmgr picom sxhkd bspwm termux-x11
 pkill -f "com.termux.x11" 2>/dev/null || true
 rm -f "$XDG_RUNTIME_DIR/.X11-unix/X0" "$XDG_RUNTIME_DIR/wayland-0" "$XDG_RUNTIME_DIR/wayland-0.lock"
 sleep 0.5
@@ -78,14 +85,18 @@ if [ "$BACKEND" = "tgui" ]; then
   am start --user 0 -n com.termux.gui/.GUIActivity >/dev/null 2>&1 || true
   if [ -f "$TGUI_SHIM" ]; then
     if command -v dbus-launch >/dev/null 2>&1; then
+      # shellcheck disable=SC2086
       exec dbus-launch --exit-with-session env LD_PRELOAD="$TGUI_SHIM" $WM_CMD
     else
+      # shellcheck disable=SC2086
       exec env LD_PRELOAD="$TGUI_SHIM" $WM_CMD
     fi
   else
     if command -v dbus-launch >/dev/null 2>&1; then
+      # shellcheck disable=SC2086
       exec dbus-launch --exit-with-session $WM_CMD
     else
+      # shellcheck disable=SC2086
       exec $WM_CMD
     fi
   fi

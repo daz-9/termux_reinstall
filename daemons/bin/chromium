@@ -1,0 +1,45 @@
+#!/data/data/com.termux/files/usr/bin/sh
+# Touch-scaled Chromium wrapper for Termux:X11 & Wayland
+set -u
+
+PREFIX_DIR="${PREFIX:-/data/data/com.termux/files/usr}"
+REAL_BIN=""
+for cand in "$PREFIX_DIR/bin/chromium-browser" "$PREFIX_DIR/bin/chromium" "$PREFIX_DIR/lib/chromium/chrome"; do
+  if [ -x "$cand" ]; then
+    REAL_BIN="$cand"
+    break
+  fi
+done
+
+if [ -z "$REAL_BIN" ]; then
+  echo "chromium: binary not found under $PREFIX_DIR/bin (install with: pkg install tur-repo && pkg install chromium)" >&2
+  exit 127
+fi
+
+FLAGS_FILE="${XDG_CONFIG_HOME:-$HOME/.config}/chromium-flags.conf"
+
+# Collect configured flags before user arguments so CLI args can override them
+EXTRA_FLAGS=""
+if [ -f "$FLAGS_FILE" ]; then
+  while IFS= read -r line || [ -n "$line" ]; do
+    case "$line" in
+      ''|'#'*) continue ;;
+      --force-device-scale-factor=*)
+        [ -n "${CHROMIUM_SCALE:-}" ] && continue
+        ;;
+    esac
+    EXTRA_FLAGS="$EXTRA_FLAGS $line"
+  done < "$FLAGS_FILE"
+fi
+
+if [ -n "${CHROMIUM_SCALE:-}" ]; then
+  EXTRA_FLAGS="$EXTRA_FLAGS --force-device-scale-factor=$CHROMIUM_SCALE"
+fi
+
+if [ "${XDG_SESSION_TYPE:-}" = "wayland" ] || [ -n "${WAYLAND_DISPLAY:-}" ]; then
+  EXTRA_FLAGS="$EXTRA_FLAGS --ozone-platform=wayland"
+fi
+
+# Intentional word splitting on simple flag tokens from chromium-flags.conf
+# shellcheck disable=SC2086
+exec "$REAL_BIN" $EXTRA_FLAGS "$@"

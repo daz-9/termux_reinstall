@@ -1,0 +1,153 @@
+name: CI (Shell, Python, C, QML & Fake-HOME Configure)
+
+on:
+  push:
+    branches: [GUI, main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    name: Validate Scripts, C Daemons, QML & Deploy
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install native build & lint tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            clang libx11-dev libxi-dev libxfixes-dev shellcheck x11-apps
+
+      - name: Shell syntax & ShellCheck
+        run: |
+          scripts=(
+            daemons/bin/chromium
+            daemons/bin/rish
+            dotfiles/quickshell/launch.sh
+            dotfiles/quickshell/launch-wayland.sh
+            dotfiles/wayland/labwc/autostart
+            dotfiles/wayland/start-wayland.sh
+            dotfiles/x11/bspwm/bspwmrc
+            dotfiles/x11/eww/launch.sh
+            dotfiles/x11/eww/scripts/audio_state.sh
+            dotfiles/x11/eww/scripts/toggle_window.sh
+            dotfiles/x11/polybar/battery.sh
+            dotfiles/x11/polybar/launch.sh
+            dotfiles/x11/start-x11.sh
+          )
+          for s in "${scripts[@]}"; do
+            bash -n "$s"
+          done
+          shellcheck -S warning "${scripts[@]}"
+
+      - name: Python compile & unit checks
+        run: |
+          python3 - <<'PY'
+          import glob, importlib.util, json, os, py_compile, subprocess, sys, tempfile
+
+          py_files = ["main.py", "setup.py", "configure.py"] + glob.glob("daemons/**/*.py", recursive=True)
+          for f in py_files:
+              py_compile.compile(f, doraise=True)
+          print(f"Compiled {len(py_files)} Python files OK")
+
+          for script in ("configure.py", "main.py", "setup.py"):
+              rc = subprocess.run([sys.executable, script, "--nonexistent-ci-flag"], capture_output=True).returncode
+              assert rc != 0, f"{script} returned 0 for invalid flag"
+
+          # Test weather.py config precedence (defaults -> weather.json -> WEATHER_* env)
+          spec = importlib.util.spec_from_file_location("qs_weather", "daemons/scripts/quickshell/weather.py")
+          weather = importlib.util.module_from_spec(spec)
+          spec.loader.exec_module(weather)
+
+          with tempfile.TemporaryDirectory() as td:
+              cfg_path = os.path.join(td, "weather.json")
+              weather.CONFIG_PATH = cfg_path
+              assert weather.load_config()[:2] == (weather.DEFAULT_LATITUDE, weather.DEFAULT_LONGITUDE)
+              with open(cfg_path, "w", encoding="utf-8") as f:
+                  json.dump({"latitude": 41.01, "longitude": 28.97, "label": "Istanbul", "timezone": "Europe/Istanbul"}, f)
+              assert weather.load_config() == (41.01, 28.97, "Istanbul", "Europe/Istanbul")
+              os.environ["WEATHER_LABEL"] = "CustomCity"
+              try:
+                  assert weather.load_config()[2] == "CustomCity"
+              finally:
+                  os.environ.pop("WEATHER_LABEL", None)
+          print("Python checks OK")
+          PY
+
+      - name: Compile C native daemons with -Werror
+        run: |
+          clang -O2 -Wall -Wextra -Werror daemons/native/qs_native.c -o /tmp/qs-native -lm -lX11 -lXi -lXfixes
+          clang -shared -fPIC -O2 -Wall -Wextra -Werror daemons/native/tgui_fix.c -o /tmp/libtgui_fix.so -ldl
+
+      - name: Validate Quickshell QML components & qmldir
+        run: |
+          python3 - <<'PY'
+          import glob, os, re
+
+          comp_dir = "dotfiles/quickshell/components"
+          qmldir_path = os.path.join(comp_dir, "qmldir")
+          assert os.path.isfile(qmldir_path), "missing components/qmldir"
+
+          declared = set()
+          for line in open(qmldir_path, encoding="utf-8"):
+              line = line.strip()
+              if not line or line.startswith("#"):
+                  continue
+              parts = line.split()
+              fname = parts[-1]
+              assert os.path.isfile(os.path.join(comp_dir, fname)), f"qmldir references missing file: {fname}"
+              declared.add(fname)
+
+          actual = {os.path.basename(p) for p in glob.glob(os.path.join(comp_dir, "*.qml"))}
+          assert declared == actual, f"qmldir mismatch: declared={declared}, actual={actual}"
+
+          qml_files = glob.glob("dotfiles/quickshell/**/*.qml", recursive=True)
+          assert qml_files, "no QML files found"
+          for path in qml_files:
+              text = open(path, encoding="utf-8").read()
+              leftover = re.findall(r"__[A-Z0-9_]+__", text)
+              assert not leftover, f"template marker left in {path}: {leftover}"
+              assert text.count("{") == text.count("}"), f"unbalanced braces in {path}"
+          print(f"Validated {len(qml_files)} QML files and qmldir OK")
+          PY
+
+      - name: Fake-HOME configure.py deployment & idempotency test
+        run: |
+          FAKE_HOME="$(mktemp -d)"
+          FAKE_PREFIX="$(mktemp -d)"
+          mkdir -p "$FAKE_HOME/.local/share/wallpapers" "$FAKE_PREFIX/share" "$FAKE_PREFIX/bin"
+          # Stub external network/Termux-only files so CI stays deterministic and offline
+          printf 'stub' > "$FAKE_HOME/.local/share/wallpapers/wallpaper.jpg"
+          printf 'stub' > "$FAKE_PREFIX/share/rish-shizuku.dex"
+
+          HOME="$FAKE_HOME" PREFIX="$FAKE_PREFIX" python3 configure.py --tmux --git --x11
+          # Re-run to verify idempotency
+          HOME="$FAKE_HOME" PREFIX="$FAKE_PREFIX" python3 configure.py --tmux --git --x11
+
+          for f in \
+            "$FAKE_HOME/.tmux.conf" \
+            "$FAKE_HOME/.config/lazygit/config.yml" \
+            "$FAKE_HOME/.local/bin/qs-native" \
+            "$FAKE_HOME/.local/lib/libtgui_fix.so" \
+            "$FAKE_HOME/.local/bin/rish" \
+            "$FAKE_HOME/.local/bin/chromium" \
+            "$FAKE_HOME/.local/bin/chromium-browser" \
+            "$FAKE_HOME/.config/chromium-flags.conf" \
+            "$FAKE_HOME/.local/share/applications/chromium.desktop" \
+            "$FAKE_HOME/.config/quickshell/shell.qml" \
+            "$FAKE_HOME/.config/quickshell/wayland.qml" \
+            "$FAKE_HOME/.config/quickshell/components/qmldir" \
+            "$FAKE_HOME/.config/quickshell/components/Theme.qml" \
+            "$FAKE_HOME/.config/quickshell/components/WidgetHub.qml" \
+            "$FAKE_HOME/.icons/TouchDot-Mocha/cursors/left_ptr" \
+            "$FAKE_PREFIX/bin/desktop" \
+            "$FAKE_PREFIX/bin/desktop-wayland"
+          do
+            test -e "$f" || { echo "Missing deployed artifact: $f" >&2; exit 1; }
+          done
+          rm -rf "$FAKE_HOME" "$FAKE_PREFIX"
+          echo "Fake-HOME deployment & idempotency OK"

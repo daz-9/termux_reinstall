@@ -10,11 +10,13 @@ if [ -z "$out" ]; then
   exit 0
 fi
 
-eval "$(printf '%s\n' "$out" | awk -F: '
+IFS=' ' read -r pct st <<EOF
+$(printf '%s\n' "$out" | awk -F: '
   /"percentage"/ { gsub(/[^0-9]/, "", $2); pct=$2 }
   /"status"/     { gsub(/[^A-Za-z]/, "", $2); st=$2 }
-  END { printf "pct=%s\nst=%s\n", pct, st }
-')"
+  END { printf "%s %s\n", pct, st }
+')
+EOF
 
 if [ -z "$pct" ]; then
   printf "BAT --\n"

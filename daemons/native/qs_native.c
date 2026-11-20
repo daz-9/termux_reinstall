@@ -287,7 +287,8 @@ static int cmd_cpu(void) {
         int64_t t_now = mono_ms();
         double dt = (double)(t_now - t_prev) / 1000.0;
         if (dt < 0.05) dt = 0.05;
-        int pct = (int)llround((((double)(j_now - j_prev) / (double)clk) / (dt * (double)ncpu)) * 100.0);
+        uint64_t dj = (j_now > j_prev) ? (j_now - j_prev) : 0;
+        int pct = (int)llround((((double)dj / (double)clk) / (dt * (double)ncpu)) * 100.0);
         if (pct < 0) pct = 0;
         if (pct > 100) pct = 100;
         j_prev = j_now;
@@ -332,7 +333,8 @@ static int cmd_sys_diag(void) {
         int64_t t_now = mono_ms();
         double dt = (double)(t_now - t_prev) / 1000.0;
         if (dt < 0.05) dt = 0.05;
-        int cpu_pct = (int)llround((((double)(j_now - j_prev) / (double)clk) / (dt * (double)ncpu)) * 100.0);
+        uint64_t dj = (j_now > j_prev) ? (j_now - j_prev) : 0;
+        int cpu_pct = (int)llround((((double)dj / (double)clk) / (dt * (double)ncpu)) * 100.0);
         if (cpu_pct < 0) cpu_pct = 0;
         if (cpu_pct > 100) cpu_pct = 100;
         j_prev = j_now;
@@ -769,12 +771,17 @@ static int cmd_wl_workspaces(void) {
                 rx_len += (size_t)r;
             }
             size_t pos = 0;
+            bool proto_err = false;
             while (rx_len - pos >= 8) {
                 uint32_t obj_id = read_u32(rx, pos);
                 uint32_t size_op = read_u32(rx, pos + 4);
                 uint32_t msize = size_op >> 16;
                 uint16_t op = (uint16_t)(size_op & 0xFFFFU);
-                if (msize < 8 || msize > rx_len - pos) break;
+                if (msize < 8 || msize > sizeof(rx)) {
+                    proto_err = true;
+                    break;
+                }
+                if (msize > rx_len - pos) break;
                 const uint8_t *pl = rx + pos + 8;
                 size_t plen = msize - 8;
 
@@ -830,12 +837,14 @@ static int cmd_wl_workspaces(void) {
                 }
                 pos += msize;
             }
+            if (proto_err) break;
             if (pos > 0) {
                 memmove(rx, rx + pos, rx_len - pos);
                 rx_len -= pos;
             }
         }
         if (pfd[1].revents & (POLLIN | POLLHUP)) {
+            if (in_len >= sizeof(in_buf) - 1) in_len = 0;
             ssize_t r = read(STDIN_FILENO, in_buf + in_len, sizeof(in_buf) - 1 - in_len);
             if (r <= 0) break;
             in_len += (size_t)r;
@@ -1015,12 +1024,19 @@ static bool rish_exec_framed(RishPipe *rp, const char *shell_body, char **out_bu
         }
         if (rc == 0) break;
         if (pf.revents & (POLLIN | POLLHUP)) {
+            bool overflow = false;
             for (;;) {
                 if (len + 4096 >= cap) {
-                    if (cap >= 524288) break;
+                    if (cap >= 524288) {
+                        overflow = true;
+                        break;
+                    }
                     cap *= 2;
                     char *nb = realloc(buf, cap);
-                    if (!nb) break;
+                    if (!nb) {
+                        overflow = true;
+                        break;
+                    }
                     buf = nb;
                 }
                 ssize_t r = read(rp->from_fd, buf + len, cap - 1 - len);
@@ -1044,6 +1060,7 @@ static bool rish_exec_framed(RishPipe *rp, const char *shell_body, char **out_bu
                     return false;
                 }
             }
+            if (overflow) break;
         }
     }
 
@@ -1439,6 +1456,20 @@ static void toggle_focus(RishPipe *rp) {
     query_and_emit_focus(rp);
 }
 
+static char *find_last_substr(char *hay, const char *limit, const char *needle) {
+    size_t nlen = strlen(needle);
+    if (nlen == 0 || !hay || limit <= hay) return NULL;
+    char *found = NULL;
+    char *p = hay;
+    while (p < limit) {
+        char *m = strstr(p, needle);
+        if (!m || m + nlen > limit) break;
+        found = m;
+        p = m + 1;
+    }
+    return found;
+}
+
 static void query_and_emit_calendar(RishPipe *rp, int64_t start_ms, int64_t end_ms) {
     if (start_ms <= 0 || end_ms <= start_ms) {
         int64_t now_s = (int64_t)time(NULL);
@@ -1471,11 +1502,12 @@ static void query_and_emit_calendar(RishPipe *rp, int64_t start_ms, int64_t end_
         size_t ll = strlen(line);
         while (ll > 0 && (line[ll - 1] == '\r' || line[ll - 1] == ' ')) line[--ll] = '\0';
 
+        char *line_end = line + ll;
         char *tp = strstr(line, "title=");
-        char *cp = strstr(line, ", calendar_id=");
-        char *ap = cp ? strstr(line, ", allDay=") : NULL;
-        char *ep = ap ? strstr(line, ", end=") : NULL;
-        char *bp = ep ? strstr(line, ", begin=") : NULL;
+        char *cp = tp ? find_last_substr(tp, line_end, ", calendar_id=") : NULL;
+        char *ap = cp ? find_last_substr(tp, cp, ", allDay=") : NULL;
+        char *ep = ap ? find_last_substr(tp, ap, ", end=") : NULL;
+        char *bp = ep ? find_last_substr(tp, ep, ", begin=") : NULL;
 
         if (tp && bp && ep && ap && cp && tp < bp && bp < ep && ep < ap && ap < cp) {
             *bp = '\0';
@@ -1520,6 +1552,7 @@ static int cmd_media_stream(void) {
             continue;
         }
         if (pfd.revents & (POLLIN | POLLHUP)) {
+            if (in_len >= sizeof(in_buf) - 1) in_len = 0;
             ssize_t r = read(STDIN_FILENO, in_buf + in_len, sizeof(in_buf) - 1 - in_len);
             if (r <= 0) break;
             in_len += (size_t)r;

@@ -44,22 +44,25 @@ def dispatch(choices: tuple[str, ...]) -> int:
 
 def main() -> int:
     """Entry point: parse CLI flags or show the interactive Setup/Configure menu."""
-    if not shutil.which("tput"):
-        if subprocess.run("pkg install ncurses-utils -y", shell=True).returncode != 0:
-            print("[-] Failed to install ncurses-utils (tput), menus won't work (you can still use flags, e.g. --setup)")
-    if subprocess.run("python -m pip install simple-term-menu==1.6.6", shell=True).returncode != 0:
-        print("[-] Failed to install simple-term-menu, menus won't work (you can still use flags, e.g. --setup)")
-
-    # Flags for non-interactive use
+    # Flags for non-interactive use (skip menu dependency installs)
     args = sys.argv[1:]
     if args:
         return dispatch(tuple(arg.lstrip("-") for arg in args))
 
+    if not shutil.which("tput"):
+        if subprocess.run("pkg install ncurses-utils -y", shell=True).returncode != 0:
+            print("[-] Failed to install ncurses-utils (tput), menus won't work (you can still use flags, e.g. --setup)")
+
     try:
         from simple_term_menu import TerminalMenu
     except ImportError:
-        print("[-] simple-term-menu is missing. Run with flags instead: python main.py --setup --configure")
-        return 1
+        if subprocess.run("python -m pip install simple-term-menu==1.6.6", shell=True).returncode != 0:
+            print("[-] Failed to install simple-term-menu, menus won't work (you can still use flags, e.g. --setup)")
+        try:
+            from simple_term_menu import TerminalMenu
+        except ImportError:
+            print("[-] simple-term-menu is missing. Run with flags instead: python main.py --setup --configure")
+            return 1
 
     terminal_menu = TerminalMenu(
         ["Setup", "Configure"],

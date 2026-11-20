@@ -1,24 +1,31 @@
 #!/data/data/com.termux/files/usr/bin/python3
-"""Fetch current weather exclusively for İzmir / Karşıyaka via Open-Meteo."""
+"""Fetch current weather via Open-Meteo with optional config/env overrides."""
 
 import json
 import os
 import sys
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 
-# Locked coordinates for İzmir / Karşıyaka only
-LATITUDE = 38.45772
-LONGITUDE = 27.1142
-LOCATION_LABEL = "İzmir/Karşıyaka"
-API_URL = (
-    f"https://api.open-meteo.com/v1/forecast"
-    f"?latitude={LATITUDE}&longitude={LONGITUDE}"
-    "&current=temperature_2m,apparent_temperature,relative_humidity_2m,is_day,weather_code,wind_speed_10m"
-    "&timezone=Europe%2FIstanbul"
+# Default location (override via ~/.config/quickshell/weather.json or WEATHER_* env vars)
+DEFAULT_LATITUDE = 38.45772
+DEFAULT_LONGITUDE = 27.1142
+DEFAULT_LABEL = "İzmir/Karşıyaka"
+DEFAULT_TIMEZONE = "Europe/Istanbul"
+
+CONFIG_PATH = os.path.join(
+    os.environ.get("XDG_CONFIG_HOME") or os.path.expanduser("~/.config"),
+    "quickshell",
+    "weather.json",
 )
-CACHE_PATH = os.path.expanduser("~/.cache/quickshell/weather-karsiyaka.json")
+CACHE_DIR = os.path.join(
+    os.environ.get("XDG_CACHE_HOME") or os.path.expanduser("~/.cache"),
+    "quickshell",
+)
+CACHE_PATH = os.path.join(CACHE_DIR, "weather.json")
+LEGACY_CACHE_PATH = os.path.join(CACHE_DIR, "weather-karsiyaka.json")
 
 WMO_MAP = {
     0: ("Clear Sky", "\U000f0599", "\U000f0594", "peach", "blue"),
@@ -52,7 +59,55 @@ WMO_MAP = {
 }
 
 
-def _format_payload(cur: dict, stale: bool = False) -> dict:
+def load_config() -> tuple[float, float, str, str]:
+    """Load weather settings from defaults -> ~/.config/quickshell/weather.json -> WEATHER_* env vars."""
+    lat = DEFAULT_LATITUDE
+    lon = DEFAULT_LONGITUDE
+    label = DEFAULT_LABEL
+    tz = DEFAULT_TIMEZONE
+
+    if os.path.isfile(CONFIG_PATH):
+        try:
+            with open(CONFIG_PATH, encoding="utf-8") as f:
+                cfg = json.load(f)
+            if isinstance(cfg, dict):
+                if cfg.get("latitude") is not None:
+                    lat = float(cfg["latitude"])
+                if cfg.get("longitude") is not None:
+                    lon = float(cfg["longitude"])
+                if cfg.get("label"):
+                    label = str(cfg["label"])
+                if cfg.get("timezone"):
+                    tz = str(cfg["timezone"])
+        except (OSError, ValueError, TypeError, json.JSONDecodeError):
+            pass
+
+    try:
+        if os.environ.get("WEATHER_LAT"):
+            lat = float(os.environ["WEATHER_LAT"])
+        if os.environ.get("WEATHER_LON"):
+            lon = float(os.environ["WEATHER_LON"])
+    except ValueError:
+        pass
+    if os.environ.get("WEATHER_LABEL"):
+        label = os.environ["WEATHER_LABEL"]
+    if os.environ.get("WEATHER_TIMEZONE"):
+        tz = os.environ["WEATHER_TIMEZONE"]
+
+    return lat, lon, label, tz
+
+
+def build_api_url(lat: float, lon: float, tz: str) -> str:
+    query = urllib.parse.urlencode({
+        "latitude": lat,
+        "longitude": lon,
+        "current": "temperature_2m,apparent_temperature,relative_humidity_2m,is_day,weather_code,wind_speed_10m",
+        "timezone": tz,
+    })
+    return f"https://api.open-meteo.com/v1/forecast?{query}"
+
+
+def _format_payload(cur: dict, location_label: str, stale: bool = False) -> dict:
     temp = cur.get("temperature_2m")
     feels = cur.get("apparent_temperature")
     code = int(cur.get("weather_code", 0) or 0)
@@ -82,7 +137,7 @@ def _format_payload(cur: dict, stale: bool = False) -> dict:
 
     return {
         "ok": True,
-        "location": LOCATION_LABEL,
+        "location": location_label,
         "temp": temp_str,
         "cond": cond,
         "detail": detail,
@@ -92,36 +147,55 @@ def _format_payload(cur: dict, stale: bool = False) -> dict:
     }
 
 
+def _load_cached(lat: float, lon: float, label: str) -> dict | None:
+    for path in (CACHE_PATH, LEGACY_CACHE_PATH):
+        if not os.path.exists(path):
+            continue
+        try:
+            with open(path, encoding="utf-8") as f:
+                cached = json.load(f)
+            if not isinstance(cached, dict) or not cached.get("current"):
+                continue
+            # Ignore cache if user switched coordinates
+            if "latitude" in cached and "longitude" in cached:
+                if abs(float(cached["latitude"]) - lat) > 0.05 or abs(float(cached["longitude"]) - lon) > 0.05:
+                    continue
+            return _format_payload(cached["current"], label, stale=True)
+        except (OSError, ValueError, TypeError, json.JSONDecodeError):
+            continue
+    return None
+
+
 def main() -> int:
+    lat, lon, label, tz = load_config()
+    api_url = build_api_url(lat, lon, tz)
     try:
-        req = urllib.request.Request(API_URL, headers={"User-Agent": "quickshell-weather/1.0"})
+        req = urllib.request.Request(api_url, headers={"User-Agent": "quickshell-weather/1.0"})
         with urllib.request.urlopen(req, timeout=5.0) as resp:
             raw = json.loads(resp.read().decode("utf-8"))
         cur = raw.get("current") or {}
         if not cur:
             raise ValueError("missing current weather")
-        payload = _format_payload(cur, stale=False)
+        payload = _format_payload(cur, label, stale=False)
         try:
-            os.makedirs(os.path.dirname(CACHE_PATH), exist_ok=True)
-            with open(CACHE_PATH, "w") as f:
-                json.dump({"current": cur, "fetched_at": int(time.time())}, f)
+            os.makedirs(CACHE_DIR, exist_ok=True)
+            with open(CACHE_PATH, "w", encoding="utf-8") as f:
+                json.dump(
+                    {"latitude": lat, "longitude": lon, "label": label, "current": cur, "fetched_at": int(time.time())},
+                    f,
+                )
         except OSError:
             pass
         print(json.dumps(payload), flush=True)
         return 0
     except (OSError, urllib.error.URLError, ValueError, json.JSONDecodeError):
-        if os.path.exists(CACHE_PATH):
-            try:
-                with open(CACHE_PATH) as f:
-                    cached = json.load(f)
-                payload = _format_payload(cached.get("current") or {}, stale=True)
-                print(json.dumps(payload), flush=True)
-                return 0
-            except (OSError, ValueError, json.JSONDecodeError):
-                pass
+        cached = _load_cached(lat, lon, label)
+        if cached:
+            print(json.dumps(cached), flush=True)
+            return 0
         print(json.dumps({
             "ok": False,
-            "location": LOCATION_LABEL,
+            "location": label,
             "temp": "--°C",
             "cond": "Offline",
             "detail": "Tap to retry Open-Meteo",

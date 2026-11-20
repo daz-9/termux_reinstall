@@ -88,7 +88,7 @@ def install_required_apps():
         "neovim", "lua55", "luarocks", "lua-language-server", "tree-sitter",
         "dotnet-sdk-9.0", "nodejs", "ruff", "ripgrep", "fd", "fzf", "lazygit",
         # GitHub / Git
-        "git", "git-delta", "openssh", "gh",
+        "git-delta", "openssh", "gh",
     ])
 
 
@@ -102,6 +102,8 @@ def install_x11() -> int:
         "libx11",
         "libxi",
         "libxfixes",
+        "dbus",
+        "pulseaudio",
         "termux-api",
         "rish-shizuku",
         "termux-x11-nightly",

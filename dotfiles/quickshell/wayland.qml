@@ -3,6 +3,7 @@ import Quickshell.Io
 import Quickshell.Wayland
 import QtQuick
 import QtQuick.Layouts
+import "./components"
 
 ShellRoot {
     id: root
@@ -40,25 +41,6 @@ ShellRoot {
     property bool sessionActive: false
     property bool widgetsOpen: false
     property bool widgetsActive: false
-__ANDROID_STATUS_PROPS__
-__MEDIA_PROPS__
-__WEATHER_PROPS__
-__FOCUS_PROPS__
-__CALENDAR_PROPS__
-    readonly property color colBase: "#e61e1e2e"
-    readonly property color colPopupBase: "#f21e1e2e"
-    readonly property color colSurface: "#313244"
-    readonly property color colSurface1: "#45475a"
-    readonly property color colText: "#cdd6f4"
-    readonly property color colSubtext: "#a6adc8"
-    readonly property color colBlue: "#89b4fa"
-    readonly property color colMauve: "#cba6f7"
-    readonly property color colTeal: "#94e2d5"
-    readonly property color colGreen: "#a6e3a1"
-    readonly property color colPeach: "#fab387"
-    readonly property color colRed: "#f38ba8"
-    readonly property color colDark: "#1e1e2e"
-    readonly property string uiFont: "JetBrainsMono Nerd Font"
 
     function runCmd(cmd) {
         Quickshell.execDetached(cmd);
@@ -79,10 +61,6 @@ __CALENDAR_PROPS__
         }
     }
 
-__ANDROID_STATUS_FN__
-__MEDIA_FN__
-__WEATHER_FN__
-__CALENDAR_FN__
     function findFocusedTitle(node) {
         if (!node) return "";
         if (node.focused && node.name && node.type !== "workspace" && node.type !== "output" && node.type !== "root") {
@@ -104,12 +82,7 @@ __CALENDAR_FN__
             widgetsCloseTimer.stop();
             root.widgetsActive = true;
             root.widgetsOpen = true;
-            root.refreshAndroidStatus();
-            root.refreshMedia();
-            root.refreshFocus();
-            root.rebuildCalendarGrid();
-            root.queryCalendarMonth(root.calViewYear, root.calViewMonth);
-            root.refreshWeatherIfStale();
+            hub.onWidgetsOpened();
         }
     }
 
@@ -139,6 +112,11 @@ __CALENDAR_FN__
     function closeAllMenus() {
         closeWidgets();
         closeSession();
+    }
+
+    WidgetHub {
+        id: hub
+        widgetsOpen: root.widgetsOpen
     }
 
     Timer {
@@ -271,9 +249,6 @@ __CALENDAR_FN__
         }
     }
 
-__ANDROID_STATUS_PROCS__
-__MEDIA_PROCS__
-__WEATHER_PROCS__
     Timer {
         interval: 1000
         running: true
@@ -297,60 +272,6 @@ __WEATHER_PROCS__
         onTriggered: root.refreshAudio()
     }
 
-    component DockButton: Rectangle {
-        id: btn
-        property string iconText: ""
-        property string subText: ""
-        property color iconColor: root.colText
-        property color baseColor: root.colSurface
-        property color activeColor: root.colSurface1
-        property bool active: false
-        property int iconSize: 28
-        property int buttonHeight: 60
-        signal clicked()
-
-        implicitWidth: 92
-        implicitHeight: btn.buttonHeight
-        radius: 18
-        color: area.pressed ? root.colBlue : (btn.active ? btn.activeColor : btn.baseColor)
-        scale: area.pressed ? 0.92 : 1.0
-
-        Behavior on scale { NumberAnimation { duration: 80 } }
-        Behavior on color { ColorAnimation { duration: 100 } }
-
-        Column {
-            anchors.centerIn: parent
-            spacing: 1
-            Text {
-                anchors.horizontalCenter: parent.horizontalCenter
-                text: btn.iconText
-                color: area.pressed ? root.colDark : btn.iconColor
-                font.family: root.uiFont
-                font.pixelSize: btn.iconSize
-                lineHeight: 1.0
-            }
-            Text {
-                visible: btn.subText.length > 0
-                anchors.horizontalCenter: parent.horizontalCenter
-                text: btn.subText
-                color: area.pressed ? root.colDark : root.colSubtext
-                font.family: root.uiFont
-                font.pixelSize: 13
-                font.bold: true
-            }
-        }
-
-        MouseArea {
-            id: area
-            anchors.fill: parent
-            anchors.leftMargin: -16
-            anchors.rightMargin: -12
-            anchors.topMargin: -4
-            anchors.bottomMargin: -4
-            onClicked: btn.clicked()
-        }
-    }
-
     // Top Status Bar (Wayland layer-shell replacement for Polybar)
     PanelWindow {
         id: topBarWindow
@@ -372,8 +293,8 @@ __WEATHER_PROCS__
             id: topBarBg
             anchors.fill: parent
             radius: 18
-            color: root.colBase
-            border.color: root.colSurface
+            color: Theme.colBase
+            border.color: Theme.colSurface
             border.width: 2
 
             RowLayout {
@@ -385,7 +306,7 @@ __WEATHER_PROCS__
                 Rectangle {
                     id: wmPill
                     radius: 12
-                    color: root.colSurface
+                    color: Theme.colSurface
                     implicitHeight: 36
                     implicitWidth: wmRow.implicitWidth + 24
                     Row {
@@ -395,15 +316,15 @@ __WEATHER_PROCS__
                         Text {
                             anchors.verticalCenter: parent.verticalCenter
                             text: "󰍙"
-                            color: root.colBlue
-                            font.family: root.uiFont
+                            color: Theme.colBlue
+                            font.family: Theme.uiFont
                             font.pixelSize: 18
                         }
                         Text {
                             anchors.verticalCenter: parent.verticalCenter
                             text: root.isSway ? "SWAY" : "LABWC"
-                            color: root.colText
-                            font.family: root.uiFont
+                            color: Theme.colText
+                            font.family: Theme.uiFont
                             font.pixelSize: 15
                             font.bold: true
                         }
@@ -415,8 +336,8 @@ __WEATHER_PROCS__
                     Layout.maximumWidth: Math.max(80, topBarBg.width / 2 - wmPill.width - clockPill.width / 2 - 48)
                     elide: Text.ElideRight
                     text: root.focusedTitle
-                    color: root.focusedTitle === "Ready" ? root.colSubtext : root.colText
-                    font.family: root.uiFont
+                    color: root.focusedTitle === "Ready" ? Theme.colSubtext : Theme.colText
+                    font.family: Theme.uiFont
                     font.pixelSize: 15
                 }
 
@@ -428,7 +349,7 @@ __WEATHER_PROCS__
                     // CPU %
                     Rectangle {
                         radius: 12
-                        color: root.colSurface
+                        color: Theme.colSurface
                         implicitHeight: 36
                         implicitWidth: cpuRow.implicitWidth + 22
                         Row {
@@ -438,15 +359,15 @@ __WEATHER_PROCS__
                             Text {
                                 anchors.verticalCenter: parent.verticalCenter
                                 text: ""
-                                color: root.cpuPct >= 80 ? root.colRed : (root.cpuPct >= 50 ? root.colPeach : root.colTeal)
-                                font.family: root.uiFont
+                                color: root.cpuPct >= 80 ? Theme.colRed : (root.cpuPct >= 50 ? Theme.colPeach : Theme.colTeal)
+                                font.family: Theme.uiFont
                                 font.pixelSize: 16
                             }
                             Text {
                                 anchors.verticalCenter: parent.verticalCenter
                                 text: root.cpuPct + "%"
-                                color: root.colText
-                                font.family: root.uiFont
+                                color: Theme.colText
+                                font.family: Theme.uiFont
                                 font.pixelSize: 15
                                 font.bold: true
                             }
@@ -456,7 +377,7 @@ __WEATHER_PROCS__
                     // RAM
                     Rectangle {
                         radius: 12
-                        color: root.colSurface
+                        color: Theme.colSurface
                         implicitHeight: 36
                         implicitWidth: memRow.implicitWidth + 22
                         Row {
@@ -466,15 +387,15 @@ __WEATHER_PROCS__
                             Text {
                                 anchors.verticalCenter: parent.verticalCenter
                                 text: "󰍛"
-                                color: root.memPct >= 85 ? root.colRed : root.colMauve
-                                font.family: root.uiFont
+                                color: root.memPct >= 85 ? Theme.colRed : Theme.colMauve
+                                font.family: Theme.uiFont
                                 font.pixelSize: 16
                             }
                             Text {
                                 anchors.verticalCenter: parent.verticalCenter
                                 text: root.memUsed + "/" + root.memTotal + "G (" + root.memPct + "%)"
-                                color: root.colText
-                                font.family: root.uiFont
+                                color: Theme.colText
+                                font.family: Theme.uiFont
                                 font.pixelSize: 15
                                 font.bold: true
                             }
@@ -485,7 +406,7 @@ __WEATHER_PROCS__
                     Rectangle {
                         visible: root.tempC >= 0
                         radius: 12
-                        color: root.colSurface
+                        color: Theme.colSurface
                         implicitHeight: 36
                         implicitWidth: tempRow.implicitWidth + 22
                         Row {
@@ -495,15 +416,15 @@ __WEATHER_PROCS__
                             Text {
                                 anchors.verticalCenter: parent.verticalCenter
                                 text: "󰔏"
-                                color: root.tempC >= 43 ? root.colRed : (root.tempC >= 38 ? root.colPeach : root.colTeal)
-                                font.family: root.uiFont
+                                color: root.tempC >= 43 ? Theme.colRed : (root.tempC >= 38 ? Theme.colPeach : Theme.colTeal)
+                                font.family: Theme.uiFont
                                 font.pixelSize: 16
                             }
                             Text {
                                 anchors.verticalCenter: parent.verticalCenter
                                 text: root.tempC.toFixed(1) + "°C"
-                                color: root.colText
-                                font.family: root.uiFont
+                                color: Theme.colText
+                                font.family: Theme.uiFont
                                 font.pixelSize: 15
                                 font.bold: true
                             }
@@ -513,7 +434,7 @@ __WEATHER_PROCS__
                     // Wi-Fi
                     Rectangle {
                         radius: 12
-                        color: root.colSurface
+                        color: Theme.colSurface
                         implicitHeight: 36
                         implicitWidth: wifiRow.implicitWidth + 22
                         Row {
@@ -523,15 +444,15 @@ __WEATHER_PROCS__
                             Text {
                                 anchors.verticalCenter: parent.verticalCenter
                                 text: root.wifiOk ? "󰖩" : "󰖪"
-                                color: root.wifiOk ? root.colBlue : root.colSubtext
-                                font.family: root.uiFont
+                                color: root.wifiOk ? Theme.colBlue : Theme.colSubtext
+                                font.family: Theme.uiFont
                                 font.pixelSize: 16
                             }
                             Text {
                                 anchors.verticalCenter: parent.verticalCenter
                                 text: root.wifiOk ? (root.wifiRate > 0 ? root.wifiRate + "M" : "Wi-Fi") : "Off"
-                                color: root.wifiOk ? root.colText : root.colSubtext
-                                font.family: root.uiFont
+                                color: root.wifiOk ? Theme.colText : Theme.colSubtext
+                                font.family: Theme.uiFont
                                 font.pixelSize: 15
                                 font.bold: true
                             }
@@ -541,7 +462,7 @@ __WEATHER_PROCS__
                     // Volume
                     Rectangle {
                         radius: 12
-                        color: root.colSurface
+                        color: Theme.colSurface
                         implicitHeight: 36
                         implicitWidth: volRow.implicitWidth + 22
                         Row {
@@ -551,15 +472,15 @@ __WEATHER_PROCS__
                             Text {
                                 anchors.verticalCenter: parent.verticalCenter
                                 text: root.muted ? "󰝟" : "󰕾"
-                                color: root.muted ? root.colRed : root.colGreen
-                                font.family: root.uiFont
+                                color: root.muted ? Theme.colRed : Theme.colGreen
+                                font.family: Theme.uiFont
                                 font.pixelSize: 16
                             }
                             Text {
                                 anchors.verticalCenter: parent.verticalCenter
                                 text: root.muted ? "MUTE" : (root.volumePct + "%")
-                                color: root.colText
-                                font.family: root.uiFont
+                                color: Theme.colText
+                                font.family: Theme.uiFont
                                 font.pixelSize: 15
                                 font.bold: true
                             }
@@ -569,7 +490,7 @@ __WEATHER_PROCS__
                     // Battery % + Power Draw
                     Rectangle {
                         radius: 12
-                        color: root.colSurface
+                        color: Theme.colSurface
                         implicitHeight: 36
                         implicitWidth: batRow.implicitWidth + 22
                         Row {
@@ -579,15 +500,15 @@ __WEATHER_PROCS__
                             Text {
                                 anchors.verticalCenter: parent.verticalCenter
                                 text: root.batStatus === "CHARGING" ? "" : (root.batPct >= 85 ? "" : (root.batPct >= 60 ? "" : (root.batPct >= 35 ? "" : (root.batPct >= 15 ? "" : ""))))
-                                color: root.batStatus === "CHARGING" || root.batPct >= 85 ? root.colGreen : (root.batPct >= 35 ? root.colText : (root.batPct >= 15 ? root.colPeach : root.colRed))
-                                font.family: root.uiFont
+                                color: root.batStatus === "CHARGING" || root.batPct >= 85 ? Theme.colGreen : (root.batPct >= 35 ? Theme.colText : (root.batPct >= 15 ? Theme.colPeach : Theme.colRed))
+                                font.family: Theme.uiFont
                                 font.pixelSize: 16
                             }
                             Text {
                                 anchors.verticalCenter: parent.verticalCenter
                                 text: root.batPct >= 0 ? (root.batPct + "%" + (root.batWatts.length > 0 ? " " + root.batWatts : "")) : "BAT --"
-                                color: root.colText
-                                font.family: root.uiFont
+                                color: Theme.colText
+                                font.family: Theme.uiFont
                                 font.pixelSize: 15
                                 font.bold: true
                             }
@@ -600,7 +521,7 @@ __WEATHER_PROCS__
                 id: clockPill
                 anchors.centerIn: parent
                 radius: 12
-                color: root.colSurface
+                color: Theme.colSurface
                 height: 36
                 width: clockRow.implicitWidth + 24
                 Row {
@@ -610,15 +531,15 @@ __WEATHER_PROCS__
                     Text {
                         anchors.verticalCenter: parent.verticalCenter
                         text: ""
-                        color: root.colBlue
-                        font.family: root.uiFont
+                        color: Theme.colBlue
+                        font.family: Theme.uiFont
                         font.pixelSize: 16
                     }
                     Text {
                         anchors.verticalCenter: parent.verticalCenter
                         text: root.clockText
-                        color: root.colBlue
-                        font.family: root.uiFont
+                        color: Theme.colBlue
+                        font.family: Theme.uiFont
                         font.pixelSize: 16
                         font.bold: true
                     }
@@ -651,8 +572,8 @@ __WEATHER_PROCS__
             anchors.fill: parent
             anchors.leftMargin: 12
             radius: 24
-            color: root.colBase
-            border.color: root.colSurface
+            color: Theme.colBase
+            border.color: Theme.colSurface
             border.width: 2
 
             ColumnLayout {
@@ -668,7 +589,7 @@ __WEATHER_PROCS__
 
                     DockButton {
                         iconText: "󰀻"
-                        iconColor: root.colBlue
+                        iconColor: Theme.colBlue
                         iconSize: dockWindow.compactDock ? 26 : 34
                         buttonHeight: dockWindow.compactDock ? 44 : 66
                         onClicked: {
@@ -678,7 +599,7 @@ __WEATHER_PROCS__
                     }
                     DockButton {
                         iconText: ""
-                        iconColor: root.colTeal
+                        iconColor: Theme.colTeal
                         iconSize: dockWindow.compactDock ? 24 : 30
                         buttonHeight: dockWindow.compactDock ? 44 : 66
                         onClicked: {
@@ -688,7 +609,7 @@ __WEATHER_PROCS__
                     }
                     DockButton {
                         iconText: ""
-                        iconColor: root.colMauve
+                        iconColor: Theme.colMauve
                         iconSize: dockWindow.compactDock ? 24 : 30
                         buttonHeight: dockWindow.compactDock ? 44 : 66
                         onClicked: {
@@ -703,10 +624,10 @@ __WEATHER_PROCS__
                     width: 60
                     height: 2
                     radius: 1
-                    color: root.colSurface1
+                    color: Theme.colSurface1
                 }
 
-                // Middle: Workspaces (1-6) + Layout/Window Toggle
+                // Middle: Workspaces (1-6) + Layout Toggle
                 Column {
                     Layout.alignment: Qt.AlignHCenter
                     spacing: dockWindow.compactDock ? 5 : 12
@@ -720,11 +641,11 @@ __WEATHER_PROCS__
                             radius: 18
                             scale: wsArea.pressed ? 0.92 : 1.0
                             color: modelData.focused
-                                ? root.colBlue
+                                ? Theme.colBlue
                                 : (modelData.urgent
-                                    ? root.colRed
-                                    : (modelData.occupied ? root.colSurface : "transparent"))
-                            border.color: (!modelData.focused && modelData.occupied) ? root.colSurface1 : "transparent"
+                                    ? Theme.colRed
+                                    : (modelData.occupied ? Theme.colSurface : "transparent"))
+                            border.color: (!modelData.focused && modelData.occupied) ? Theme.colSurface1 : "transparent"
                             border.width: 1
 
                             Behavior on scale { NumberAnimation { duration: 80 } }
@@ -735,8 +656,8 @@ __WEATHER_PROCS__
                                 spacing: 6
                                 Text {
                                     text: String(modelData.num)
-                                    color: (modelData.focused || modelData.urgent) ? root.colDark : (modelData.occupied ? root.colText : root.colSubtext)
-                                    font.family: root.uiFont
+                                    color: (modelData.focused || modelData.urgent) ? Theme.colDark : (modelData.occupied ? Theme.colText : Theme.colSubtext)
+                                    font.family: Theme.uiFont
                                     font.pixelSize: dockWindow.compactDock ? 18 : 24
                                     font.bold: modelData.focused || modelData.occupied
                                 }
@@ -746,7 +667,7 @@ __WEATHER_PROCS__
                                     width: 8
                                     height: 8
                                     radius: 4
-                                    color: root.colBlue
+                                    color: Theme.colBlue
                                 }
                             }
 
@@ -773,7 +694,7 @@ __WEATHER_PROCS__
                         buttonHeight: dockWindow.compactDock ? 42 : 56
                         iconText: "󰕳"
                         subText: dockWindow.compactDock ? "" : "LAY"
-                        iconColor: root.colSubtext
+                        iconColor: Theme.colSubtext
                         iconSize: dockWindow.compactDock ? 20 : 24
                         onClicked: root.runCmd(["swaymsg", "layout", "toggle", "tabbed", "split"])
                     }
@@ -791,8 +712,8 @@ __WEATHER_PROCS__
                         Text {
                             anchors.horizontalCenter: parent.horizontalCenter
                             text: root.widgetsOpen ? "󰅁" : "󰅂"
-                            color: root.widgetsOpen ? root.colBlue : root.colSubtext
-                            font.family: root.uiFont
+                            color: root.widgetsOpen ? Theme.colBlue : Theme.colSubtext
+                            font.family: Theme.uiFont
                             font.pixelSize: 22
                         }
                         Rectangle {
@@ -800,7 +721,7 @@ __WEATHER_PROCS__
                             width: 6
                             height: dockWindow.compactDock ? 20 : 44
                             radius: 3
-                            color: root.widgetsOpen ? root.colBlue : root.colSurface1
+                            color: root.widgetsOpen ? Theme.colBlue : Theme.colSurface1
                             Behavior on color { ColorAnimation { duration: 120 } }
                         }
                     }
@@ -817,7 +738,7 @@ __WEATHER_PROCS__
                     width: 60
                     height: 2
                     radius: 1
-                    color: root.colSurface1
+                    color: Theme.colSurface1
                 }
 
                 // Bottom: Window Controls + Volume + Session Power
@@ -828,7 +749,7 @@ __WEATHER_PROCS__
                     DockButton {
                         buttonHeight: dockWindow.compactDock ? 36 : 56
                         iconText: ""
-                        iconColor: root.colText
+                        iconColor: Theme.colText
                         iconSize: dockWindow.compactDock ? 20 : 26
                         onClicked: {
                             if (root.isSway) {
@@ -841,7 +762,7 @@ __WEATHER_PROCS__
                     DockButton {
                         buttonHeight: dockWindow.compactDock ? 36 : 56
                         iconText: ""
-                        iconColor: root.colText
+                        iconColor: Theme.colText
                         iconSize: dockWindow.compactDock ? 20 : 26
                         onClicked: {
                             if (root.isSway) {
@@ -854,7 +775,7 @@ __WEATHER_PROCS__
                     DockButton {
                         buttonHeight: dockWindow.compactDock ? 36 : 56
                         iconText: ""
-                        iconColor: root.colRed
+                        iconColor: Theme.colRed
                         iconSize: dockWindow.compactDock ? 22 : 28
                         onClicked: {
                             if (root.isSway) {
@@ -870,13 +791,13 @@ __WEATHER_PROCS__
                         width: 60
                         height: 2
                         radius: 1
-                        color: root.colSurface1
+                        color: Theme.colSurface1
                     }
 
                     DockButton {
                         buttonHeight: dockWindow.compactDock ? 34 : 50
                         iconText: "󰐕"
-                        iconColor: root.colText
+                        iconColor: Theme.colText
                         iconSize: dockWindow.compactDock ? 20 : 26
                         onClicked: {
                             root.runCmd(["pactl", "set-sink-volume", "@DEFAULT_SINK@", "+5%"]);
@@ -887,7 +808,7 @@ __WEATHER_PROCS__
                         buttonHeight: dockWindow.compactDock ? 46 : 66
                         iconText: root.muted ? "󰝟" : "󰕾"
                         subText: root.muted ? "MUTE" : (root.volumePct + "%")
-                        iconColor: root.muted ? root.colRed : root.colGreen
+                        iconColor: root.muted ? Theme.colRed : Theme.colGreen
                         iconSize: dockWindow.compactDock ? 20 : 24
                         onClicked: {
                             root.runCmd(["pactl", "set-sink-mute", "@DEFAULT_SINK@", "toggle"]);
@@ -897,7 +818,7 @@ __WEATHER_PROCS__
                     DockButton {
                         buttonHeight: dockWindow.compactDock ? 34 : 50
                         iconText: "󰍴"
-                        iconColor: root.colText
+                        iconColor: Theme.colText
                         iconSize: dockWindow.compactDock ? 20 : 26
                         onClicked: {
                             root.runCmd(["pactl", "set-sink-volume", "@DEFAULT_SINK@", "-5%"]);
@@ -909,8 +830,8 @@ __WEATHER_PROCS__
                         id: sessionBtn
                         buttonHeight: dockWindow.compactDock ? 42 : 62
                         iconText: ""
-                        iconColor: root.sessionOpen ? root.colDark : root.colRed
-                        baseColor: root.sessionOpen ? root.colRed : root.colSurface
+                        iconColor: root.sessionOpen ? Theme.colDark : Theme.colRed
+                        baseColor: root.sessionOpen ? Theme.colRed : Theme.colSurface
                         iconSize: dockWindow.compactDock ? 22 : 28
                         onClicked: root.toggleSession()
                     }
@@ -963,99 +884,10 @@ __WEATHER_PROCS__
         exclusionMode: ExclusionMode.Ignore
         WlrLayershell.layer: WlrLayer.Overlay
 
-        Item {
-            anchors.fill: parent
-            clip: true
-
-            Rectangle {
-                id: drawerBg
-                width: parent.width
-                height: parent.height
-                x: root.widgetsOpen ? 0 : -44
-                opacity: root.widgetsOpen ? 1.0 : 0.0
-                radius: 24
-                color: root.colPopupBase
-                border.color: root.colSurface1
-                border.width: 2
-
-                Behavior on x { NumberAnimation { duration: 180; easing.type: Easing.OutCubic } }
-                Behavior on opacity { NumberAnimation { duration: 140 } }
-
-                Flickable {
-                    anchors.fill: parent
-                    anchors.margins: 28
-                    contentWidth: width
-                    contentHeight: drawerCol.implicitHeight
-                    clip: true
-                    boundsBehavior: Flickable.StopAtBounds
-                    interactive: contentHeight > height
-
-                    ColumnLayout {
-                        id: drawerCol
-                        width: parent.width
-                        spacing: 20
-
-                        RowLayout {
-                            Layout.fillWidth: true
-                            Row {
-                                spacing: 14
-                                Layout.fillWidth: true
-                                Text {
-                                    anchors.verticalCenter: parent.verticalCenter
-                                    text: "󰀻"
-                                    color: root.colBlue
-                                    font.family: root.uiFont
-                                    font.pixelSize: 34
-                                }
-                                Text {
-                                    anchors.verticalCenter: parent.verticalCenter
-                                    text: "Widgets"
-                                    color: root.colText
-                                    font.family: root.uiFont
-                                    font.pixelSize: 30
-                                    font.bold: true
-                                }
-                            }
-                            Rectangle {
-                                width: 48
-                                height: 48
-                                radius: 16
-                                color: closeBtnArea.pressed ? root.colBlue : root.colSurface
-                                border.color: root.colSurface1
-                                border.width: 1
-                                Text {
-                                    anchors.centerIn: parent
-                                    text: ""
-                                    color: closeBtnArea.pressed ? root.colDark : root.colSubtext
-                                    font.family: root.uiFont
-                                    font.pixelSize: 22
-                                }
-                                MouseArea {
-                                    id: closeBtnArea
-                                    anchors.fill: parent
-                                    onClicked: root.closeWidgets()
-                                }
-                            }
-                        }
-
-                        RowLayout {
-                            Layout.fillWidth: true
-                            spacing: 18
-
-__WEATHER_CARD__
-
-__FOCUS_CARD__
-                        }
-
-__ANDROID_STATUS_CARD__
-__MEDIA_CARD__
-
-__CALENDAR_CARD__
-
-__AGENDA_CARD__
-                    }
-                }
-            }
+        WidgetsDrawerContent {
+            hub: hub
+            open: root.widgetsOpen
+            onCloseRequested: root.closeWidgets()
         }
     }
 
@@ -1077,76 +909,16 @@ __AGENDA_CARD__
         exclusionMode: ExclusionMode.Ignore
         WlrLayershell.layer: WlrLayer.Overlay
 
-        Item {
-            anchors.fill: parent
-            clip: true
-
-            Rectangle {
-                width: parent.width
-                height: 330
-                y: root.sessionOpen ? 0 : 28
-                opacity: root.sessionOpen ? 1.0 : 0.0
-                radius: 22
-                color: root.colPopupBase
-                border.color: root.colSurface1
-                border.width: 2
-
-                Behavior on y { NumberAnimation { duration: 160; easing.type: Easing.OutCubic } }
-                Behavior on opacity { NumberAnimation { duration: 130 } }
-
-                Column {
-                    anchors.fill: parent
-                    anchors.margins: 18
-                    spacing: 18
-
-                    Repeater {
-                        model: [
-                            { label: "Reload Shell", icon: "", color: root.colBlue, cmd: ["sh", "-c", "$HOME/.config/quickshell/launch-wayland.sh &"] },
-                            { label: "Reload WM", icon: "", color: root.colTeal, cmd: root.isSway ? ["swaymsg", "reload"] : ["labwc", "--reconfigure"] },
-                            { label: "Exit Wayland", icon: "", color: root.colRed, cmd: root.isSway ? ["swaymsg", "exit"] : ["labwc", "--exit"] }
-                        ]
-                        delegate: Rectangle {
-                            required property var modelData
-                            width: parent.width
-                            height: 86
-                            radius: 16
-                            color: popArea.pressed ? root.colBlue : root.colSurface
-                            Row {
-                                anchors.verticalCenter: parent.verticalCenter
-                                anchors.left: parent.left
-                                anchors.leftMargin: 20
-                                spacing: 16
-                                Text {
-                                    anchors.verticalCenter: parent.verticalCenter
-                                    text: modelData.icon
-                                    color: popArea.pressed ? root.colDark : modelData.color
-                                    font.family: root.uiFont
-                                    font.pixelSize: 26
-                                }
-                                Text {
-                                    anchors.verticalCenter: parent.verticalCenter
-                                    text: modelData.label
-                                    color: popArea.pressed ? root.colDark : root.colText
-                                    font.family: root.uiFont
-                                    font.pixelSize: 21
-                                    font.bold: true
-                                }
-                            }
-                            MouseArea {
-                                id: popArea
-                                anchors.fill: parent
-                                anchors.leftMargin: -18
-                                anchors.rightMargin: -18
-                                anchors.topMargin: -9
-                                anchors.bottomMargin: -9
-                                onClicked: {
-                                    root.closeSession();
-                                    root.runCmd(modelData.cmd);
-                                }
-                            }
-                        }
-                    }
-                }
+        SessionMenuContent {
+            open: root.sessionOpen
+            items: [
+                { label: "Reload Shell", icon: "", color: Theme.colBlue, cmd: ["sh", "-c", "$HOME/.config/quickshell/launch-wayland.sh &"] },
+                { label: "Reload WM", icon: "", color: Theme.colTeal, cmd: root.isSway ? ["swaymsg", "reload"] : ["labwc", "--reconfigure"] },
+                { label: "Exit Wayland", icon: "", color: Theme.colRed, cmd: root.isSway ? ["swaymsg", "exit"] : ["labwc", "--exit"] }
+            ]
+            onActionTriggered: cmd => {
+                root.closeSession();
+                root.runCmd(cmd);
             }
         }
     }

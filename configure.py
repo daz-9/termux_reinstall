@@ -1,4 +1,4 @@
-#!/data/data/com.termux/files/usr/bin/env python3
+#!/usr/bin/env python3
 """Configure Zsh/Starship, Neovim (AstroNvim/LazyVim + native LSPs), Font/Colors, Tmux, Rish, and X11/Wayland GUIs."""
 
 import math
@@ -34,28 +34,6 @@ def run(cmd: str, desc: str, env: dict | None = None) -> bool:
 def _asset_path(*parts: str) -> str:
     """Return absolute path to an asset inside the repository."""
     return os.path.join(HERE, *parts)
-
-
-def _read_asset(*parts: str) -> str:
-    """Read a UTF-8 text asset from the repository."""
-    with open(_asset_path(*parts), encoding="utf-8") as f:
-        return f.read()
-
-
-def _install_text(content: str, dest_raw: str, mode: int = 0o644) -> bool:
-    """Write text content to dest_raw (expanding ~) with directory creation and chmod."""
-    dest = os.path.expanduser(dest_raw)
-    try:
-        os.makedirs(os.path.dirname(dest), exist_ok=True)
-        with open(dest, "w", encoding="utf-8") as f:
-            f.write(content)
-        os.chmod(dest, mode)
-        print(f"[+] wrote {dest_raw}")
-        return True
-    except OSError as e:
-        print(f"[-] writing {dest_raw} failed: {e}")
-        failures.append(f"writing {dest_raw}")
-        return False
 
 
 def _install_asset(src_parts: tuple[str, ...], dest_raw: str, mode: int = 0o644, backup: bool = False) -> bool:
@@ -113,9 +91,9 @@ def main() -> int:
     """Parse CLI flags or show the interactive configuration menu."""
     args = sys.argv[1:]
     if args:
-        dispatch(tuple(arg.lstrip("-") for arg in args))
+        rc = dispatch(tuple(arg.lstrip("-") for arg in args))
         print_summary()
-        return 1 if failures else 0
+        return 1 if (failures or rc != 0) else 0
 
     if not shutil.which("tput"):
         run("pkg install ncurses-utils -y", "installing ncurses-utils")
@@ -133,9 +111,9 @@ def main() -> int:
     if not menu_entry_indices:
         print("[!] No menu entry selected. Exiting.")
         return 1
-    dispatch(terminal_menu.chosen_menu_entries)
+    rc = dispatch(terminal_menu.chosen_menu_entries)
     print_summary()
-    return 1 if failures else 0
+    return 1 if (failures or rc != 0) else 0
 
 
 def neovim_config() -> int:
@@ -255,6 +233,10 @@ if command -v yazi >/dev/null 2>&1; then
     [ "$cwd" != "$PWD" ] && [ -d "$cwd" ] && builtin cd -- "$cwd" || builtin true
     command rm -f -- "$tmp"
   }}
+fi
+
+if [ -d "$HOME/.local/bin" ]; then
+  export PATH="$HOME/.local/bin:$PATH"
 fi
 
 if [ -d "$HOME/.dotnet/tools" ]; then
@@ -706,32 +688,12 @@ def configure_rish() -> int:
     return 0 if _install_asset(("daemons", "bin", "rish"), "~/.local/bin/rish", 0o755) else 1
 
 
-def _render_quickshell(tpl_name: str) -> str:
-    """Expand shared QML widget/partial templates into shell.qml or wayland.qml."""
-    partials = {
-        "__ANDROID_STATUS_PROPS__": ("dotfiles", "quickshell", "partials", "android_status_props.qml"),
-        "__ANDROID_STATUS_FN__": ("dotfiles", "quickshell", "partials", "android_status_fn.qml"),
-        "__ANDROID_STATUS_PROCS__": ("dotfiles", "quickshell", "partials", "android_status_procs.qml"),
-        "__ANDROID_STATUS_CARD__": ("dotfiles", "quickshell", "partials", "android_status_card.qml"),
-        "__MEDIA_PROPS__": ("dotfiles", "quickshell", "partials", "media_props.qml"),
-        "__MEDIA_FN__": ("dotfiles", "quickshell", "partials", "media_fn.qml"),
-        "__MEDIA_PROCS__": ("dotfiles", "quickshell", "partials", "media_procs.qml"),
-        "__MEDIA_CARD__": ("dotfiles", "quickshell", "partials", "media_card.qml"),
-        "__WEATHER_PROPS__": ("dotfiles", "quickshell", "partials", "weather_props.qml"),
-        "__WEATHER_FN__": ("dotfiles", "quickshell", "partials", "weather_fn.qml"),
-        "__WEATHER_PROCS__": ("dotfiles", "quickshell", "partials", "weather_procs.qml"),
-        "__WEATHER_CARD__": ("dotfiles", "quickshell", "partials", "weather_card.qml"),
-        "__FOCUS_PROPS__": ("dotfiles", "quickshell", "partials", "focus_props.qml"),
-        "__FOCUS_CARD__": ("dotfiles", "quickshell", "partials", "focus_card.qml"),
-        "__CALENDAR_PROPS__": ("dotfiles", "quickshell", "partials", "calendar_props.qml"),
-        "__CALENDAR_FN__": ("dotfiles", "quickshell", "partials", "calendar_fn.qml"),
-        "__CALENDAR_CARD__": ("dotfiles", "quickshell", "partials", "calendar_card.qml"),
-        "__AGENDA_CARD__": ("dotfiles", "quickshell", "partials", "agenda_card.qml"),
-    }
-    text = _read_asset("dotfiles", "quickshell", tpl_name)
-    for token, asset_parts in partials.items():
-        text = text.replace(token, _read_asset(*asset_parts))
-    return text
+def _install_dir_assets(src_parts: tuple[str, ...], dest_dir_raw: str, mode: int = 0o644) -> None:
+    """Copy every regular file from a repo asset directory into dest_dir_raw."""
+    src_dir = _asset_path(*src_parts)
+    for name in sorted(os.listdir(src_dir)):
+        if os.path.isfile(os.path.join(src_dir, name)):
+            _install_asset((*src_parts, name), f"{dest_dir_raw.rstrip('/')}/{name}", mode)
 
 
 def configure_x11() -> int:
@@ -767,6 +729,8 @@ def configure_x11() -> int:
         (("dotfiles", "x11", "eww", "scripts", "audio_state.sh"), "~/.config/eww/scripts/audio_state.sh", 0o755),
         (("dotfiles", "x11", "eww", "scripts", "toggle_window.sh"), "~/.config/eww/scripts/toggle_window.sh", 0o755),
         (("daemons", "scripts", "eww", "submenu_watch.py"), "~/.config/eww/scripts/submenu_watch.py", 0o755),
+        (("dotfiles", "quickshell", "shell.qml"), "~/.config/quickshell/shell.qml", 0o644),
+        (("dotfiles", "quickshell", "wayland.qml"), "~/.config/quickshell/wayland.qml", 0o644),
         (("dotfiles", "quickshell", "launch.sh"), "~/.config/quickshell/launch.sh", 0o755),
         (("dotfiles", "quickshell", "launch-wayland.sh"), "~/.config/quickshell/launch-wayland.sh", 0o755),
         (("daemons", "scripts", "quickshell", "submenu_watch.py"), "~/.config/quickshell/scripts/submenu_watch.py", 0o755),
@@ -784,14 +748,17 @@ def configure_x11() -> int:
         (("dotfiles", "x11", "rofi", "config.rasi"), "~/.config/rofi/config.rasi", 0o644),
         (("dotfiles", "x11", "xfce4", "terminalrc"), "~/.config/xfce4/terminal/terminalrc", 0o644),
         (("dotfiles", "x11", "xfce4", "xfce4-terminal.xml"), "~/.config/xfce4/xfconf/xfce-perchannel-xml/xfce4-terminal.xml", 0o644),
+        (("dotfiles", "x11", "chromium", "chromium-flags.conf"), "~/.config/chromium-flags.conf", 0o644),
+        (("dotfiles", "x11", "chromium", "chromium.desktop"), "~/.local/share/applications/chromium.desktop", 0o644),
+        (("daemons", "bin", "chromium"), "~/.local/bin/chromium", 0o755),
+        (("daemons", "bin", "chromium"), "~/.local/bin/chromium-browser", 0o755),
         (("dotfiles", "x11", "start-x11.sh"), "~/start-x11.sh", 0o755),
         (("dotfiles", "wayland", "start-wayland.sh"), "~/start-wayland.sh", 0o755),
         (("dotfiles", "x11", "start-x11.sh"), os.path.join(prefix_bin, "desktop"), 0o755),
         (("dotfiles", "wayland", "start-wayland.sh"), os.path.join(prefix_bin, "desktop-wayland"), 0o755),
     ]
 
-    _install_text(_render_quickshell("shell.qml"), "~/.config/quickshell/shell.qml", 0o644)
-    _install_text(_render_quickshell("wayland.qml"), "~/.config/quickshell/wayland.qml", 0o644)
+    _install_dir_assets(("dotfiles", "quickshell", "components"), "~/.config/quickshell/components", 0o644)
     for src_parts, dest_raw, mode in assets:
         _install_asset(src_parts, dest_raw, mode)
     return 0
