@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Configure Zsh/Starship, Neovim (AstroNvim/LazyVim + native LSPs), Font/Colors, Tmux, Rish, and X11/Wayland GUIs."""
 
+import glob
 import math
 import os
 import re
@@ -712,7 +713,8 @@ def configure_x11() -> int:
     _build_c_artifact(("daemons", "native", "qs_native.c"), "qs_native.c", "~/.local/bin/qs-native", ["-O2", "-Wall", "-Wextra", "-Werror", "-lm", "-lX11", "-lXi", "-lXfixes"], 0o755)
     configure_rish()
 
-    prefix_bin = os.path.join(os.environ.get("PREFIX", "/data/data/com.termux/files/usr"), "bin")
+    prefix = os.environ.get("PREFIX", "/data/data/com.termux/files/usr")
+    prefix_bin = os.path.join(prefix, "bin")
     assets = [
         (("dotfiles", "x11", "Xresources"), "~/.Xresources", 0o644),
         (("dotfiles", "x11", "bspwm", "bspwmrc"), "~/.config/bspwm/bspwmrc", 0o755),
@@ -750,6 +752,7 @@ def configure_x11() -> int:
         (("dotfiles", "x11", "xfce4", "xfce4-terminal.xml"), "~/.config/xfce4/xfconf/xfce-perchannel-xml/xfce4-terminal.xml", 0o644),
         (("dotfiles", "x11", "chromium", "chromium-flags.conf"), "~/.config/chromium-flags.conf", 0o644),
         (("dotfiles", "x11", "chromium", "chromium.desktop"), "~/.local/share/applications/chromium.desktop", 0o644),
+        (("dotfiles", "x11", "chromium-default.conf"), os.path.join(prefix, "etc", "chromium", "default.conf"), 0o644),
         (("daemons", "bin", "chromium"), "~/.local/bin/chromium", 0o755),
         (("daemons", "bin", "chromium"), "~/.local/bin/chromium-browser", 0o755),
         (("dotfiles", "x11", "start-x11.sh"), "~/start-x11.sh", 0o755),
@@ -761,6 +764,10 @@ def configure_x11() -> int:
     _install_dir_assets(("dotfiles", "quickshell", "components"), "~/.config/quickshell/components", 0o644)
     for src_parts, dest_raw, mode in assets:
         _install_asset(src_parts, dest_raw, mode)
+
+    for profile_dir in sorted(glob.glob(os.path.expanduser("~/.config/mozilla/firefox/*.default*"))):
+        if os.path.isdir(profile_dir):
+            _install_asset(("dotfiles", "x11", "firefox-user.js"), os.path.join(profile_dir, "user.js"), 0o644)
     return 0
 
 

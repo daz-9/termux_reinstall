@@ -39,6 +39,9 @@ kill_procs eww quickshell qs-native polybar fastcompmgr picom sxhkd bspwm termux
 pkill -f '[v]irgl_test_server_android' 2>/dev/null || true
 pkill -f "com.termux.x11" 2>/dev/null || true
 rm -f "$XDG_RUNTIME_DIR/.virgl_test" "$BSPWM_SOCKET" "$XDG_RUNTIME_DIR/.X11-unix/X0"
+if ! pgrep -x chrome >/dev/null 2>&1; then
+  rm -f "$XDG_CONFIG_HOME/chromium/SingletonLock" "$XDG_CONFIG_HOME/chromium/SingletonSocket" "$XDG_CONFIG_HOME/chromium/SingletonCookie"
+fi
 sleep 0.5
 
 # Hardware OpenGL ES -> Vulkan passthrough via ANGLE for Qt Quick / GL apps
@@ -50,7 +53,6 @@ if command -v virgl_test_server_android >/dev/null 2>&1; then
     i=$((i + 1))
     sleep 0.05
   done
-  export GALLIUM_DRIVER=virpipe
 fi
 
 if command -v pulseaudio >/dev/null 2>&1; then

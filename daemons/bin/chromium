@@ -16,6 +16,17 @@ if [ -z "$REAL_BIN" ]; then
   exit 127
 fi
 
+if ! pgrep -x chrome >/dev/null 2>&1; then
+  rm -f "${XDG_CONFIG_HOME:-$HOME/.config}/chromium/SingletonLock" \
+        "${XDG_CONFIG_HOME:-$HOME/.config}/chromium/SingletonSocket" \
+        "${XDG_CONFIG_HOME:-$HOME/.config}/chromium/SingletonCookie"
+fi
+
+if [ "${CHROMIUM_FORCE_VIRGL:-0}" != "1" ]; then
+  unset GALLIUM_DRIVER
+fi
+export CHROMIUM_WRAPPER_ACTIVE=1
+
 FLAGS_FILE="${XDG_CONFIG_HOME:-$HOME/.config}/chromium-flags.conf"
 
 # Collect configured flags before user arguments so CLI args can override them
