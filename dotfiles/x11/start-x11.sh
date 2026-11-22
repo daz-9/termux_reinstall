@@ -19,22 +19,18 @@ kill_procs() {
 }
 
 cleanup() {
-  eww kill >/dev/null 2>&1 || true
-  kill_procs eww quickshell qs-native polybar fastcompmgr picom sxhkd bspwm termux-x11
+  kill_procs quickshell qs-native polybar fastcompmgr sxhkd bspwm termux-x11
   [ -f "$TMPDIR/hide-cursor.pid" ] && kill "$(cat "$TMPDIR/hide-cursor.pid")" 2>/dev/null || true
-  [ -f "$TMPDIR/eww-watch.pid" ] && kill "$(cat "$TMPDIR/eww-watch.pid")" 2>/dev/null || true
   [ -f "$TMPDIR/qs-watch.pid" ] && kill "$(cat "$TMPDIR/qs-watch.pid")" 2>/dev/null || true
   [ -n "$VIRGL_PID" ] && kill "$VIRGL_PID" 2>/dev/null || true
-  rm -f "$XDG_RUNTIME_DIR/.virgl_test" "$BSPWM_SOCKET" "$XDG_RUNTIME_DIR/.X11-unix/X0" "$TMPDIR/hide-cursor.pid" "$TMPDIR/eww-watch.pid" "$TMPDIR/qs-watch.pid"
+  rm -f "$XDG_RUNTIME_DIR/.virgl_test" "$BSPWM_SOCKET" "$XDG_RUNTIME_DIR/.X11-unix/X0" "$TMPDIR/hide-cursor.pid" "$TMPDIR/qs-watch.pid"
 }
 trap cleanup EXIT INT TERM
 
 # Clean up stale X11 / WM / VirGL processes from an earlier session
-eww kill >/dev/null 2>&1 || true
-[ -f "$TMPDIR/eww-watch.pid" ] && kill "$(cat "$TMPDIR/eww-watch.pid")" 2>/dev/null || true
 [ -f "$TMPDIR/qs-watch.pid" ] && kill "$(cat "$TMPDIR/qs-watch.pid")" 2>/dev/null || true
-rm -f "$TMPDIR/eww-watch.pid" "$TMPDIR/qs-watch.pid"
-kill_procs eww quickshell qs-native polybar fastcompmgr picom sxhkd bspwm termux-x11 virgl_test_serv
+rm -f "$TMPDIR/qs-watch.pid"
+kill_procs quickshell qs-native polybar fastcompmgr sxhkd bspwm termux-x11 virgl_test_serv
 [ -f "$TMPDIR/hide-cursor.pid" ] && kill "$(cat "$TMPDIR/hide-cursor.pid")" 2>/dev/null || true
 pkill -f '[v]irgl_test_server_android' 2>/dev/null || true
 pkill -f "com.termux.x11" 2>/dev/null || true

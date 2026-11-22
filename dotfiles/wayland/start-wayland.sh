@@ -44,14 +44,13 @@ kill_procs() {
 }
 
 cleanup() {
-  kill_procs quickshell qs-native swaybg sway labwc Xwayland polybar eww sxhkd bspwm termux-x11
+  kill_procs quickshell qs-native swaybg sway labwc Xwayland polybar sxhkd bspwm termux-x11
   rm -f "$XDG_RUNTIME_DIR"/.X11-unix/X* "$XDG_RUNTIME_DIR"/.X*-lock "$XDG_RUNTIME_DIR"/wayland-* "$XDG_RUNTIME_DIR"/sway-ipc.*
 }
 trap cleanup EXIT INT TERM
 
 # Clean stale sessions before launching
-eww kill >/dev/null 2>&1 || true
-kill_procs quickshell qs-native swaybg sway labwc Xwayland polybar eww fastcompmgr picom sxhkd bspwm termux-x11
+kill_procs quickshell qs-native swaybg sway labwc Xwayland polybar fastcompmgr sxhkd bspwm termux-x11
 pkill -f "com.termux.x11" 2>/dev/null || true
 rm -f "$XDG_RUNTIME_DIR"/.X11-unix/X* "$XDG_RUNTIME_DIR"/.X*-lock "$XDG_RUNTIME_DIR"/wayland-* "$XDG_RUNTIME_DIR"/sway-ipc.*
 if ! pgrep -x chrome >/dev/null 2>&1; then

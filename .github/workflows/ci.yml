@@ -32,9 +32,6 @@ jobs:
             dotfiles/wayland/labwc/autostart
             dotfiles/wayland/start-wayland.sh
             dotfiles/x11/bspwm/bspwmrc
-            dotfiles/x11/eww/launch.sh
-            dotfiles/x11/eww/scripts/audio_state.sh
-            dotfiles/x11/eww/scripts/toggle_window.sh
             dotfiles/x11/polybar/battery.sh
             dotfiles/x11/polybar/launch.sh
             dotfiles/x11/start-x11.sh

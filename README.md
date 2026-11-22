@@ -45,7 +45,7 @@ Installs the packages:
 | Editor | `neovim`, `lua55`, `luarocks`, `lua-language-server`, `tree-sitter`, `dotnet-sdk-9.0` + `csharp-ls`, `nodejs` + `basedpyright`, `ruff`, `ripgrep`, `fd`, `fzf`, `lazygit` |
 | Shell & CLI | `zsh`, `starship`, `git`, `zip`, `eza`, `yazi`, `zoxide`, `bat`, `glow`, `tmux`, `man`, `manpages`, `fastfetch`, `termux-api`, `rish-shizuku` |
 | GitHub | `git`, `git-delta`, `openssh`, `gh` |
-| **x11** *(optional in `setup.py`)* | `x11-repo`, `tur-repo`, `clang`, `libx11`, `libxi`, `libxfixes`, `dbus`, `pulseaudio`, `termux-api`, `rish-shizuku`, `termux-x11-nightly`, `quickshell`, `eww`, `bspwm`, `polybar`, `rofi`, `sxhkd`, `fastcompmgr`, `sway`, `swaybg`, `labwc`, `foot`, `feh`, `xfce4-terminal`, `alacritty`, `virglrenderer-android`, `xorg-xcursorgen`, `xorg-xsetroot` |
+| **x11** *(optional in `setup.py`)* | `x11-repo`, `tur-repo`, `clang`, `libx11`, `libxi`, `libxfixes`, `dbus`, `pulseaudio`, `termux-api`, `rish-shizuku`, `termux-x11-nightly`, `quickshell`, `bspwm`, `polybar`, `rofi`, `sxhkd`, `fastcompmgr`, `sway`, `swaybg`, `labwc`, `foot`, `feh`, `xfce4-terminal`, `alacritty`, `virglrenderer-android`, `xorg-xcursorgen`, `xorg-xsetroot` |
 
 Then sets **zsh** as the default shell (only if zsh actually installed).
 
@@ -56,14 +56,11 @@ If a step fails, the script prints why, carries on, and lists every failed step 
 | Option | What it does |
 |--------|--------------|
 | **Zsh** | Installs [Oh My Zsh](https://ohmyz.sh/), `zsh-autosuggestions` + `zsh-syntax-highlighting` (plus `git`, `colored-man-pages`), wires up `zoxide`/`fzf`/`bat`/`yazi` (`y` wrapper)/`fastfetch` (skipped inside `tmux`/Neovim), prepends `~/.local/bin` to `PATH`, sets `.NET` env (`~/.dotnet/tools`, `DOTNET_ROOT`, `DOTNET_ROLL_FORWARD=Major`), installs [`dotfiles/shell/starship.toml`](dotfiles/shell/starship.toml) (`xmake`, C, Python, etc.), installs `~/.local/bin/rish`, and adds aliases |
-| **Neovim** | Installs [AstroNvim](https://astronvim.com/) *(recommended)* or [LazyVim](https://www.lazyvim.org/). Existing configs are backed up to `*.bak`. Uses Termux's native `clangd`, `lua-language-server`, `csharp-ls`, `basedpyright`, and `ruff` instead of Mason ([clangd#1944](https://github.com/clangd/clangd/issues/1944)), disables Mason auto-installs, fixes Termux italic comment clipping (`termux_cursor.lua`), and includes `tokyonight` + Snacks colorscheme preview |
+| **Neovim** | Installs [AstroNvim](https://astronvim.com/). Existing configs are backed up to `*.bak`. Uses Termux's native `clangd`, `lua-language-server`, `csharp-ls`, `basedpyright`, and `ruff` instead of Mason ([clangd#1944](https://github.com/clangd/clangd/issues/1944)), disables Mason auto-installs, fixes Termux italic comment clipping (`termux_cursor.lua`), and includes `tokyonight` + Snacks colorscheme preview |
 | **Font** | Installs JetBrainsMono Nerd Font (`~/.termux/font.ttf`), Catppuccin Mocha colors (`~/.termux/colors.properties`), and Termux app tweaks (`~/.termux/termux.properties`: `bell-character = ignore`, `hide-soft-keyboard-on-startup`, `volume-keys = volume`, `extra-keys = []`, `disable-hardware-keyboard-shortcuts = false`, `back-key=escape`) |
 | **Tmux** | Writes `~/.tmux.conf` (Catppuccin Mocha bar, mouse support, `Ctrl-a`/`Ctrl-b` prefix, `\|`/`-` splits, `Alt+Arrow` pane switching, `vi` copy mode with Android clipboard via `termux-clipboard-set`) |
 | **Git** | Configures `git-delta` side-by-side diffs with line numbers, `zdiff3` merge conflicts, and `diff.colorMoved` in `~/.gitconfig`, plus `delta` + Nerd Font icons in `~/.config/lazygit/config.yml` |
-| **x11** | Writes Catppuccin Mocha configs for X11 (`bspwm`, `sxhkd`, `polybar`, `quickshell` + QML `components/`, `eww`, `fastcompmgr`, `rofi`, `xfce4-terminal`, `picom`) and Wayland (`sway`, `labwc`, `foot`, `quickshell`), installs touch-scaled Chromium wrapper & flags (`~/.local/bin/chromium`, `~/.config/chromium-flags.conf`, `~/.local/share/applications/chromium.desktop`, override scale with `CHROMIUM_SCALE`), compiles `~/.local/bin/qs-native` (native C daemons & persistent `rish` media-control pipe) and `~/.local/lib/libtgui_fix.so` (`--tgui` orientation/color shim), installs `~/.local/bin/rish` + Quickshell helpers (`weather.py` — override location via `~/.config/quickshell/weather.json` or `WEATHER_*` env vars, `android_status.py`), builds `TouchDot-Mocha` cursor theme, and installs `~/start-x11.sh` (`desktop`) and `~/start-wayland.sh` (`desktop-wayland`) |
-
-> [!NOTE]
-> **Neovim distro stability:** On Termux, **AstroNvim is stable** and recommended. **LazyVim tends to crash** on Termux, though the option is still available if you want to test it.
+| **x11** | Writes Catppuccin Mocha configs for X11 (`bspwm`, `sxhkd`, `polybar`, `quickshell` + QML `components/`, `fastcompmgr`, `rofi`, `xfce4-terminal`) and Wayland (`sway`, `labwc`, `foot`, `quickshell`), installs touch-scaled Chromium wrapper & flags (`~/.local/bin/chromium`, `~/.config/chromium-flags.conf`, `~/.local/share/applications/chromium.desktop`, override scale with `CHROMIUM_SCALE`), plus Firefox `user.js`, compiles `~/.local/bin/qs-native` (native C daemons & persistent `rish` media-control pipe) and `~/.local/lib/libtgui_fix.so` (`--tgui` orientation/color shim), installs `~/.local/bin/rish` + Quickshell helpers (`weather.py` — override location via `~/.config/quickshell/weather.json` or `WEATHER_*` env vars, `android_status.py`), builds `TouchDot-Mocha` cursor theme, and installs `~/start-x11.sh` (`desktop`) and `~/start-wayland.sh` (`desktop-wayland`) |
 
 #### Custom `xmake` commands
 
@@ -97,7 +94,7 @@ Skip the menus by passing flags (case-insensitive, any number of them):
 ```sh
 python main.py --setup --configure
 python setup.py --core --x11
-python configure.py --zsh --font --tmux --git --astronvim     # recommended (also supports --lazyvim, --neovim, --termux, --rish, --x11)
+python configure.py --zsh --font --tmux --git --astronvim     # also supports --neovim, --termux, --rish, --x11
 desktop                                                        # start X11 (bspwm + Quickshell/Polybar)
 desktop-wayland [sway|labwc] [--x11|--tgui] [--renderer=pixman|gles2|vulkan]
 ```

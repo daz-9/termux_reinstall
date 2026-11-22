@@ -27,11 +27,7 @@ bspc config presel_feedback_color "#cba6f7"
 
 if command -v fastcompmgr >/dev/null 2>&1; then
   pkill -x fastcompmgr 2>/dev/null || true
-  pkill -x picom 2>/dev/null || true
   fastcompmgr >/dev/null 2>&1 &
-elif command -v picom >/dev/null 2>&1; then
-  pkill -x picom 2>/dev/null || true
-  picom --config "${XDG_CONFIG_HOME:-$HOME/.config}/picom/picom.conf" >> "${TMPDIR:-/data/data/com.termux/files/usr/tmp}/picom.log" 2>&1 &
 fi
 
 if command -v feh >/dev/null 2>&1 && [ -f "$HOME/.local/share/wallpapers/wallpaper.jpg" ]; then
@@ -44,13 +40,9 @@ if [ -f "${TMPDIR:-/data/data/com.termux/files/usr/tmp}/hide-cursor.pid" ]; then
 fi
 if [ -x "$HOME/.local/bin/qs-native" ]; then
   "$HOME/.local/bin/qs-native" hide-cursor >/dev/null 2>&1 &
-elif [ -x "${XDG_CONFIG_HOME:-$HOME/.config}/bspwm/hide-cursor.py" ]; then
-  "${XDG_CONFIG_HOME:-$HOME/.config}/bspwm/hide-cursor.py" >/dev/null 2>&1 &
 fi
 
 "${XDG_CONFIG_HOME:-$HOME/.config}/polybar/launch.sh" &
 if command -v quickshell >/dev/null 2>&1; then
   "${XDG_CONFIG_HOME:-$HOME/.config}/quickshell/launch.sh" &
-elif command -v eww >/dev/null 2>&1; then
-  "${XDG_CONFIG_HOME:-$HOME/.config}/eww/launch.sh" &
 fi

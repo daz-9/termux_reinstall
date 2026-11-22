@@ -108,7 +108,6 @@ def install_x11() -> int:
         "rish-shizuku",
         "termux-x11-nightly",
         "quickshell",
-        "eww",
         "bspwm",
         "polybar",
         "rofi",

@@ -1,4 +1,4 @@
-/* Catppuccin Mocha touch-coherent Rofi theme matching Eww & Polybar */
+/* Catppuccin Mocha touch-coherent Rofi theme matching Quickshell & Polybar */
 configuration {
     modi: "drun,run,window";
     font: "JetBrainsMono Nerd Font 17";

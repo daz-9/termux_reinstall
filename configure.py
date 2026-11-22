@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Configure Zsh/Starship, Neovim (AstroNvim/LazyVim + native LSPs), Font/Colors, Tmux, Rish, and X11/Wayland GUIs."""
+"""Configure Zsh/Starship, Neovim (AstroNvim + native LSPs), Font/Colors, Tmux, Rish, and X11/Wayland GUIs."""
 
 import glob
 import math
@@ -117,25 +117,6 @@ def main() -> int:
     return 1 if (failures or rc != 0) else 0
 
 
-def neovim_config() -> int:
-    """Show a sub-menu to choose between LazyVim and AstroNvim."""
-    if not shutil.which("tput"):
-        run("pkg install ncurses-utils -y", "installing ncurses-utils")
-
-    from simple_term_menu import TerminalMenu
-
-    neovim_config_menu = TerminalMenu(
-        ["LazyVim", "AstroNvim"],
-        multi_select=False,
-        title="Select Neovim config (press enter to confirm):",
-    )
-    menu_entry_index = neovim_config_menu.show()
-    if menu_entry_index is None:
-        print("[!] No menu entry selected. Exiting.")
-        return 1
-    return dispatch_neovim_config((neovim_config_menu.chosen_menu_entry,))
-
-
 def _run_handlers(choices: tuple[str, ...], handlers: dict) -> int:
     """Run each selected handler by name, isolating exceptions so remaining steps still run."""
     rc = 0
@@ -160,8 +141,7 @@ def dispatch(choices: tuple[str, ...]) -> int:
     """Dispatch top-level configuration choices (menu entries or CLI flags)."""
     return _run_handlers(choices, {
         "zsh": lambda: configure_zsh(),
-        "neovim": lambda: neovim_config(),
-        "lazyvim": lambda: configure_vim_lazyvim(),
+        "neovim": lambda: configure_vim_astrovim(),
         "astronvim": lambda: configure_vim_astrovim(),
         "font": lambda: configure_font(),
         "termux": lambda: configure_font(),
@@ -169,14 +149,6 @@ def dispatch(choices: tuple[str, ...]) -> int:
         "git": lambda: configure_git(),
         "x11": lambda: configure_x11(),
         "rish": lambda: configure_rish(),
-    })
-
-
-def dispatch_neovim_config(choices: tuple[str, ...]) -> int:
-    """Dispatch Neovim distro selection."""
-    return _run_handlers(choices, {
-        "lazyvim": lambda: configure_vim_lazyvim(),
-        "astronvim": lambda: configure_vim_astrovim(),
     })
 
 
@@ -488,21 +460,6 @@ def _write_lsp_spec(distro: str, filename: str, bin_name: str, missing_hint: str
         print(f"[!] {bin_name} not found yet, {missing_hint}")
 
 
-def configure_vim_lazyvim() -> int:
-    """Install LazyVim starter config and wire up Termux-native LSPs."""
-    _backup_nvim_dirs()
-    if not run("git clone https://github.com/LazyVim/starter ~/.config/nvim", "cloning LazyVim"):
-        _restore_nvim_dirs()
-        return 1
-    subprocess.run("rm -rf ~/.config/nvim/.git", shell=True)
-    _write_lsp_spec("lazyvim", "clangd.lua", "clangd", "install clang (run Setup) for C completion/diagnostics")
-    _write_lsp_spec("lazyvim", "lua_ls.lua", "lua-language-server", "install lua-language-server (run Setup) for Lua completion/diagnostics")
-    _write_lsp_spec("lazyvim", "csharp_ls.lua", "csharp-ls", "install dotnet-sdk-9.0 + csharp-ls (run Setup) for C# completion/diagnostics")
-    _write_lsp_spec("lazyvim", "python_lsp.lua", "basedpyright-langserver", "install nodejs + basedpyright + ruff (run Setup) for Python completion/diagnostics")
-    _write_lsp_spec("lazyvim", "termux_cursor.lua", "nvim", "")
-    return 0
-
-
 def configure_vim_astrovim() -> int:
     """Install AstroNvim template config and wire up Termux-native LSPs."""
     _backup_nvim_dirs()
@@ -718,35 +675,21 @@ def configure_x11() -> int:
     assets = [
         (("dotfiles", "x11", "Xresources"), "~/.Xresources", 0o644),
         (("dotfiles", "x11", "bspwm", "bspwmrc"), "~/.config/bspwm/bspwmrc", 0o755),
-        (("daemons", "scripts", "bspwm", "hide-cursor.py"), "~/.config/bspwm/hide-cursor.py", 0o755),
         (("dotfiles", "x11", "sxhkd", "sxhkdrc"), "~/.config/sxhkd/sxhkdrc", 0o644),
         (("dotfiles", "x11", "polybar", "config.ini"), "~/.config/polybar/config.ini", 0o644),
         (("dotfiles", "x11", "polybar", "battery.sh"), "~/.config/polybar/battery.sh", 0o755),
-        (("daemons", "scripts", "polybar", "cpu.py"), "~/.config/polybar/cpu.py", 0o755),
         (("dotfiles", "x11", "polybar", "launch.sh"), "~/.config/polybar/launch.sh", 0o755),
-        (("dotfiles", "x11", "eww", "eww.yuck"), "~/.config/eww/eww.yuck", 0o644),
-        (("dotfiles", "x11", "eww", "eww.scss"), "~/.config/eww/eww.scss", 0o644),
-        (("dotfiles", "x11", "eww", "launch.sh"), "~/.config/eww/launch.sh", 0o755),
-        (("daemons", "scripts", "eww", "bspwm_state.py"), "~/.config/eww/scripts/bspwm_state.py", 0o755),
-        (("dotfiles", "x11", "eww", "scripts", "audio_state.sh"), "~/.config/eww/scripts/audio_state.sh", 0o755),
-        (("dotfiles", "x11", "eww", "scripts", "toggle_window.sh"), "~/.config/eww/scripts/toggle_window.sh", 0o755),
-        (("daemons", "scripts", "eww", "submenu_watch.py"), "~/.config/eww/scripts/submenu_watch.py", 0o755),
         (("dotfiles", "quickshell", "shell.qml"), "~/.config/quickshell/shell.qml", 0o644),
         (("dotfiles", "quickshell", "wayland.qml"), "~/.config/quickshell/wayland.qml", 0o644),
         (("dotfiles", "quickshell", "launch.sh"), "~/.config/quickshell/launch.sh", 0o755),
         (("dotfiles", "quickshell", "launch-wayland.sh"), "~/.config/quickshell/launch-wayland.sh", 0o755),
-        (("daemons", "scripts", "quickshell", "submenu_watch.py"), "~/.config/quickshell/scripts/submenu_watch.py", 0o755),
-        (("daemons", "scripts", "quickshell", "sys_diag.py"), "~/.config/quickshell/scripts/sys_diag.py", 0o755),
-        (("daemons", "scripts", "quickshell", "wl_workspaces.py"), "~/.config/quickshell/scripts/wl_workspaces.py", 0o755),
         (("daemons", "scripts", "quickshell", "android_status.py"), "~/.config/quickshell/scripts/android_status.py", 0o755),
-        (("daemons", "scripts", "quickshell", "media_control.py"), "~/.config/quickshell/scripts/media_control.py", 0o755),
         (("daemons", "scripts", "quickshell", "weather.py"), "~/.config/quickshell/scripts/weather.py", 0o755),
         (("dotfiles", "wayland", "sway", "config"), "~/.config/sway/config", 0o644),
         (("dotfiles", "wayland", "labwc", "rc.xml"), "~/.config/labwc/rc.xml", 0o644),
         (("dotfiles", "wayland", "labwc", "themerc"), "~/.config/labwc/themerc", 0o644),
         (("dotfiles", "wayland", "labwc", "autostart"), "~/.config/labwc/autostart", 0o755),
         (("dotfiles", "wayland", "foot", "foot.ini"), "~/.config/foot/foot.ini", 0o644),
-        (("dotfiles", "x11", "picom", "picom.conf"), "~/.config/picom/picom.conf", 0o644),
         (("dotfiles", "x11", "rofi", "config.rasi"), "~/.config/rofi/config.rasi", 0o644),
         (("dotfiles", "x11", "xfce4", "terminalrc"), "~/.config/xfce4/terminal/terminalrc", 0o644),
         (("dotfiles", "x11", "xfce4", "xfce4-terminal.xml"), "~/.config/xfce4/xfconf/xfce-perchannel-xml/xfce4-terminal.xml", 0o644),

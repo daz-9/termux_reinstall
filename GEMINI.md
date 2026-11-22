@@ -6,13 +6,13 @@ All desktop GUI assets live under `dotfiles/` and `daemons/`, are deployed/compi
 
 ## 1. Palette (Catppuccin Mocha)
 
-Use these exact tokens across Quickshell, Polybar, Eww, Rofi, `bspwm`, `sway`, `labwc`, `xfce4-terminal`, `foot`, and cursors:
+Use these exact tokens across Quickshell, Polybar, Rofi, `bspwm`, `sway`, `labwc`, `xfce4-terminal`, `foot`, and cursors:
 
 | Token | Value | Usage |
 | :--- | :--- | :--- |
 | `base` | `#1e1e2e` | Opaque background (Polybar, Rofi, terminal, `touchdot` dark text) |
-| `base-glass` | `rgba(30, 30, 46, 0.90)` / `#e61e1e2e` | Left dock container (`.dock-bg` / `colBase`) |
-| `popup-glass` | `rgba(30, 30, 46, 0.95)` / `#f21e1e2e` | Floating popups (`.popup-bg` / `colPopupBase`) |
+| `base-glass` | `rgba(30, 30, 46, 0.90)` / `#e61e1e2e` | Left dock container (`Theme.colBase`) |
+| `popup-glass` | `rgba(30, 30, 46, 0.95)` / `#f21e1e2e` | Floating popups (`Theme.colPopupBase`) |
 | `surface` | `#313244` | Pill/button resting fill, occupied workspace, borders, input bars |
 | `surface1` | `#45475a` | Dividers, separators, inactive/occupied borders |
 | `text` | `#cdd6f4` | Primary text and neutral icons |
@@ -32,27 +32,24 @@ Use these exact tokens across Quickshell, Polybar, Eww, Rofi, `bspwm`, `sway`, `
   - Terminal: `19pt`
   - Polybar: `14pt` (vertical offset `;3`)
   - Rofi: `14`
-  - Dock pills (Quickshell / Eww): `25–34px` icons, `24px` workspace digits, `13–14px` sublabels; popups: `26px` icons, `20px` bold labels.
+  - Dock pills (Quickshell): `25–34px` icons, `24px` workspace digits, `13–14px` sublabels; popups: `26px` icons, `20px` bold labels.
 - **Icon consistency & centering:**
   - Prefer **Material Design Nerd Font glyphs (`\U000f0...`)** for uniform square bounds (especially volume controls: `\U000f0415`, `\U000f057e`, `\U000f075f`, `\U000f0374`). In QML files, store literal UTF-8 Nerd Font glyphs directly rather than Python `\U000...` escapes.
-  - Because non-Mono `JetBrainsMono Nerd Font` gives Nerd Font glyphs a 1-cell logical advance in GTK/Pango, wide icons overflow right in Eww. Any wide glyph in Eww **must** declare an explicit `.nf-*` `padding-right` compensation in `eww.scss` and be pixel-checked on `:9` via `XGetImage` (target horizontal center within `±1px` of the pill center).
-  - Every `box` holding centered text/digits inside fixed-width containers (`ws-pill`, etc.) must set `:hexpand true` + `:halign "center"`.
 
 ---
 
 ## 3. Geometry, Radii & Compositing
 
 - **Radii scale:**
-  - Windows (`picom.conf` / `labwc`): `corner-radius = 16–18`
+  - Windows (`labwc`): `corner-radius = 16`
   - Dock container: `24px` (`2px` `#313244` border)
   - Popup container: `22px` (`2px` `#45475a` border)
   - Buttons / workspace pills / Rofi window: `16–18px`
   - Top Polybar: `height = 40pt`, `radius = 16`, `border-size = 8pt` transparent outer margin (`~73px` top strut)
   - `bspwm` / `sway` / `labwc`: `window_gap = 12`, `border_width = 2`
 - **Transparency & compositors:**
-  - X11 (`bspwmrc`) prefers `fastcompmgr` for lightweight Termux:X11 compositing, falling back to `picom` (`backend = "xrender"`, `shadow = false`, `fading = false`, `vsync = true`).
-  - Keep `window_type = 'dock'`, `'desktop'`, and `fullscreen` excluded from `picom` corner rounding (`corner-radius = 0`) so Polybar and 32-bit ARGB docks render their own corners cleanly.
-  - Ensure a compositor is running before launching `quickshell` or `eww daemon` so translucent ARGB dock/popup surfaces render cleanly.
+  - X11 (`bspwmrc`) uses `fastcompmgr` for lightweight Termux:X11 compositing.
+  - Ensure a compositor is running before launching `quickshell` so translucent ARGB dock/popup surfaces render cleanly.
   - Wayland (`start-wayland.sh`) supports `sway` and `labwc` over `--x11` (nested Termux:X11) or `--tgui` (Termux:GUI with `~/.local/lib/libtgui_fix.so` fixing ABGR format and `WL_OUTPUT_TRANSFORM_FLIPPED_180`).
 
 ---
@@ -63,17 +60,16 @@ Use these exact tokens across Quickshell, Polybar, Eww, Rofi, `bspwm`, `sway`, `
   - Left: active window title (`xwindow` / toplevel title, truncated at 60 chars)
   - Right: `cpu`, `memory` (`%gb_used% (%percentage_used%%)`), `battery` (+ thermals/Wi-Fi on Wayland), `date`
   - **Do not** place workspace lists, launchers, or interactive click menus on the top bar.
-- **Left dock (Quickshell primary, Eww fallback) = touch control surface:**
+- **Left dock (Quickshell) = touch control surface:**
   - Anchored `top left` at `x=0px, y=80px`, `width=128px`, reserving `128px` left padding (`bspwm` struts + `bspc config left_padding 128`, or layer-shell exclusive zone on Wayland).
   - Top-to-bottom grouping separated by `60×2px` `#45475a` dividers:
     1. **Launchers:** App drawer (`rofi -show drun`), Terminal (`xfce4-terminal` on X11 / `foot` on Wayland), Window switcher (`rofi -show window`)
     2. **Workspaces `1`–`6` & Layout:** Live `bspc subscribe report` / Sway IPC / `ext_workspace_manager_v1` state (`focused` blue pill, `occupied` surface pill + `8px` blue dot, `empty` transparent), followed by Monocle/Tiled toggle (`M`/`T`) on X11
     3. **Widgets toggle:** Opens the floating Widgets submenu (Termux:API & Shizuku status, Android Media/Spotify controls, Open-Meteo weather, Focus/DND, dynamic Calendar & Android Agenda)
-    4. **Spacer** (`:vexpand true` / `Layout.fillHeight: true`)
+    4. **Spacer** (`Layout.fillHeight: true`)
     5. **Window actions:** Float toggle, Fullscreen toggle, Close window
     6. **Audio:** `+`, Mute/`%` badge, `-` (instant visual update on tap)
     7. **Session toggle:** Opens the bottom-left `session_menu` popup at `x=140px` (**Reload Bars**, **Restart WM**, **Exit**)
-- **Primary vs. fallback:** `bspwmrc` launches `quickshell` when installed and falls back to `eww`; keep both configs valid in `dotfiles/`.
 
 ---
 
@@ -88,7 +84,7 @@ Termux:X11 is configured in **Touchscreen mode** (direct touch input rather than
 - **No right-click or hover dependencies:** Every primary control must remain discoverable and triggerable with a single tap (or a simple one-handed drag/pinch enhancement). Never require right-click bindings, hover-to-reveal menus, or keyboard-only shortcuts for UI chrome.
 - **No sticky `:hover` visuals:** Style active/pressed feedback only (`#89b4fa` background + `#1e1e2e` foreground); leave hover states unstyled so direct touch taps never leave buttons stuck highlighted.
 - **Enlarged invisible hitboxes:** Keep visible pills `92×50–66px` inside `128px`-wide edge-to-edge transparent touch targets (with split-gap vertical padding and zero dead pixels between controls) so thumb taps and edge drags register reliably.
-- **Cursor coherence:** Keep the `TouchDot-Mocha` (`32px`) translucent frosted circle Xcursor (`~/.icons/TouchDot-Mocha`, `xsetroot -cursor_name left_ptr`) alongside `qs-native hide-cursor` (fallback `hide-cursor.py`), hiding the cursor immediately after tap release and after `0.6s` idle so direct touch feels native while external pointer/stylus use remains clear.
+- **Cursor coherence:** Keep the `TouchDot-Mocha` (`32px`) translucent frosted circle Xcursor (`~/.icons/TouchDot-Mocha`, `xsetroot -cursor_name left_ptr`) alongside `qs-native hide-cursor`, hiding the cursor immediately after tap release and after `0.6s` idle so direct touch feels native while external pointer/stylus use remains clear.
 
 ---
 
