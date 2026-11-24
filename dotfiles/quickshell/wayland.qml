@@ -9,14 +9,15 @@ ShellRoot {
     id: root
 
     readonly property bool isSway: (Quickshell.env("SWAYSOCK") || "").length > 0
-    property var desktopStates: [
-        { num: 1, focused: true, occupied: false, urgent: false },
-        { num: 2, focused: false, occupied: false, urgent: false },
-        { num: 3, focused: false, occupied: false, urgent: false },
-        { num: 4, focused: false, occupied: false, urgent: false },
-        { num: 5, focused: false, occupied: false, urgent: false },
-        { num: 6, focused: false, occupied: false, urgent: false }
-    ]
+    ListModel {
+        id: desktopModel
+        ListElement { num: 1; focused: true; occupied: false; urgent: false }
+        ListElement { num: 2; focused: false; occupied: false; urgent: false }
+        ListElement { num: 3; focused: false; occupied: false; urgent: false }
+        ListElement { num: 4; focused: false; occupied: false; urgent: false }
+        ListElement { num: 5; focused: false; occupied: false; urgent: false }
+        ListElement { num: 6; focused: false; occupied: false; urgent: false }
+    }
     property int volumePct: 50
     property bool muted: false
     property int cpuPct: 0
@@ -41,7 +42,29 @@ ShellRoot {
     property bool sessionActive: false
     property bool widgetsOpen: false
     property bool widgetsActive: false
+    property bool widgetsEverOpened: false
+    property bool notifsOpen: false
+    property bool notifsActive: false
+    property bool notifsEverOpened: false
     property bool backdropActive: false
+    readonly property alias hub: widgetHub
+
+    function syncDesktopStates(next) {
+        if (next.length === desktopModel.count) {
+            for (let i = 0; i < next.length; i++) {
+                const cur = desktopModel.get(i);
+                const nxt = next[i];
+                if (cur.num !== nxt.num || cur.focused !== nxt.focused || cur.occupied !== nxt.occupied || cur.urgent !== nxt.urgent) {
+                    desktopModel.set(i, nxt);
+                }
+            }
+        } else {
+            desktopModel.clear();
+            for (let i = 0; i < next.length; i++) {
+                desktopModel.append(next[i]);
+            }
+        }
+    }
 
     function runCmd(cmd) {
         Quickshell.execDetached(cmd);
@@ -80,7 +103,9 @@ ShellRoot {
             closeWidgets();
         } else {
             closeSession();
+            closeNotifications();
             widgetsCloseTimer.stop();
+            root.widgetsEverOpened = true;
             root.widgetsActive = true;
             root.widgetsOpen = true;
             backdropShowTimer.restart();
@@ -95,11 +120,34 @@ ShellRoot {
         widgetsCloseTimer.restart();
     }
 
+    function toggleNotifications() {
+        if (root.notifsOpen) {
+            closeNotifications();
+        } else {
+            closeSession();
+            closeWidgets();
+            notifsCloseTimer.stop();
+            root.notifsEverOpened = true;
+            root.notifsActive = true;
+            root.notifsOpen = true;
+            backdropShowTimer.restart();
+            hub.onNotifsOpened();
+        }
+    }
+
+    function closeNotifications() {
+        if (!root.notifsOpen && !root.notifsActive) return;
+        backdropShowTimer.stop();
+        root.notifsOpen = false;
+        notifsCloseTimer.restart();
+    }
+
     function toggleSession() {
         if (root.sessionOpen) {
             closeSession();
         } else {
             closeWidgets();
+            closeNotifications();
             sessionCloseTimer.stop();
             root.sessionActive = true;
             root.sessionOpen = true;
@@ -116,20 +164,22 @@ ShellRoot {
 
     function closeAllMenus() {
         closeWidgets();
+        closeNotifications();
         closeSession();
     }
 
     WidgetHub {
-        id: hub
+        id: widgetHub
         widgetsOpen: root.widgetsOpen
+        notifsOpen: root.notifsOpen
     }
 
     Timer {
         id: backdropShowTimer
-        interval: 175
+        interval: 120
         repeat: false
         onTriggered: {
-            if (root.widgetsOpen || root.sessionOpen) {
+            if (root.widgetsOpen || root.notifsOpen || root.sessionOpen) {
                 root.backdropActive = true;
             }
         }
@@ -137,12 +187,24 @@ ShellRoot {
 
     Timer {
         id: widgetsCloseTimer
-        interval: 170
+        interval: 120
         repeat: false
         onTriggered: {
             if (!root.widgetsOpen) {
                 root.widgetsActive = false;
-                if (!root.sessionActive) root.backdropActive = false;
+                if (!root.sessionActive && !root.notifsActive) root.backdropActive = false;
+            }
+        }
+    }
+
+    Timer {
+        id: notifsCloseTimer
+        interval: 120
+        repeat: false
+        onTriggered: {
+            if (!root.notifsOpen) {
+                root.notifsActive = false;
+                if (!root.sessionActive && !root.widgetsActive) root.backdropActive = false;
             }
         }
     }
@@ -154,7 +216,7 @@ ShellRoot {
         onTriggered: {
             if (!root.sessionOpen) {
                 root.sessionActive = false;
-                if (!root.widgetsActive) root.backdropActive = false;
+                if (!root.widgetsActive && !root.notifsActive) root.backdropActive = false;
             }
         }
     }
@@ -170,7 +232,7 @@ ShellRoot {
                 try {
                     const list = JSON.parse(line);
                     if (Array.isArray(list) && list.length > 0) {
-                        root.desktopStates = list;
+                        root.syncDesktopStates(list);
                     }
                 } catch (e) {}
             }
@@ -224,7 +286,7 @@ ShellRoot {
                             urgent: ws ? Boolean(ws.urgent) : false
                         });
                     }
-                    root.desktopStates = next;
+                    root.syncDesktopStates(next);
                 } catch (e) {}
             }
         }
@@ -280,11 +342,27 @@ ShellRoot {
         }
     }
 
-    Timer {
-        interval: 4000
+    Process {
+        id: pactlSubProc
+        command: ["pactl", "subscribe"]
         running: true
+        stdout: SplitParser {
+            onRead: line => {
+                if (line.indexOf("on sink") >= 0) {
+                    root.refreshAudio();
+                }
+            }
+        }
+    }
+
+    Timer {
+        interval: 10000
+        running: !pactlSubProc.running
         repeat: true
-        onTriggered: root.refreshAudio()
+        onTriggered: {
+            pactlSubProc.running = true;
+            root.refreshAudio();
+        }
     }
 
     Timer {
@@ -655,36 +733,37 @@ ShellRoot {
                     spacing: dockWindow.compactDock ? 5 : 12
 
                     Repeater {
-                        model: root.desktopStates
+                        model: desktopModel
                         delegate: Rectangle {
-                            required property var modelData
+                            required property int num
+                            required property bool focused
+                            required property bool occupied
+                            required property bool urgent
                             width: 92
                             height: dockWindow.compactDock ? 36 : 58
                             radius: 18
-                            scale: wsArea.pressed ? 0.92 : 1.0
-                            color: modelData.focused
+                            color: focused
                                 ? Theme.colBlue
-                                : (modelData.urgent
+                                : (urgent
                                     ? Theme.colRed
-                                    : (modelData.occupied ? Theme.colSurface : "transparent"))
-                            border.color: (!modelData.focused && modelData.occupied) ? Theme.colSurface1 : "transparent"
+                                    : (occupied ? Theme.colSurface : "transparent"))
+                            border.color: (!focused && occupied) ? Theme.colSurface1 : "transparent"
                             border.width: 1
 
-                            Behavior on scale { NumberAnimation { duration: 80 } }
-                            Behavior on color { ColorAnimation { duration: 100 } }
+                            Behavior on color { ColorAnimation { duration: 80 } }
 
                             Row {
                                 anchors.centerIn: parent
                                 spacing: 6
                                 Text {
-                                    text: String(modelData.num)
-                                    color: (modelData.focused || modelData.urgent) ? Theme.colDark : (modelData.occupied ? Theme.colText : Theme.colSubtext)
+                                    text: String(num)
+                                    color: (focused || urgent) ? Theme.colDark : (occupied ? Theme.colText : Theme.colSubtext)
                                     font.family: Theme.uiFont
                                     font.pixelSize: dockWindow.compactDock ? 18 : 24
-                                    font.bold: modelData.focused || modelData.occupied
+                                    font.bold: focused || occupied
                                 }
                                 Rectangle {
-                                    visible: modelData.occupied && !modelData.focused
+                                    visible: occupied && !focused
                                     anchors.verticalCenter: parent.verticalCenter
                                     width: 8
                                     height: 8
@@ -702,9 +781,9 @@ ShellRoot {
                                 anchors.bottomMargin: -4
                                 onClicked: {
                                     if (root.isSway) {
-                                        root.runCmd(["swaymsg", "workspace", "number", String(modelData.num)]);
+                                        root.runCmd(["swaymsg", "workspace", "number", String(num)]);
                                     } else {
-                                        wlWsProc.write(String(modelData.num) + "\n");
+                                        wlWsProc.write(String(num) + "\n");
                                     }
                                 }
                             }
@@ -722,11 +801,11 @@ ShellRoot {
                     }
                 }
 
-                // Empty Dock Spacer -> Click to Toggle Widget Drawer
+                // Empty Dock Spacer -> 1-touch Widget Hub, 2-touch Notifications
                 Item {
                     Layout.fillWidth: true
                     Layout.fillHeight: true
-                    Layout.minimumHeight: dockWindow.compactDock ? 32 : 60
+                    Layout.minimumHeight: dockWindow.compactDock ? 38 : 68
 
                     Column {
                         anchors.centerIn: parent
@@ -741,17 +820,64 @@ ShellRoot {
                         Rectangle {
                             anchors.horizontalCenter: parent.horizontalCenter
                             width: 6
-                            height: dockWindow.compactDock ? 20 : 44
+                            height: dockWindow.compactDock ? 18 : 38
                             radius: 3
-                            color: root.widgetsOpen ? Theme.colBlue : Theme.colSurface1
+                            color: root.widgetsOpen ? Theme.colBlue : (root.notifsOpen ? Theme.colMauve : Theme.colSurface1)
                             Behavior on color { ColorAnimation { duration: 120 } }
+                        }
+                        Text {
+                            anchors.horizontalCenter: parent.horizontalCenter
+                            text: root.notifsOpen ? "󰄽" : "󰄾"
+                            color: root.notifsOpen ? Theme.colMauve : Theme.colSubtext
+                            font.family: Theme.uiFont
+                            font.pixelSize: 20
                         }
                     }
 
-                    MouseArea {
+                    MultiPointTouchArea {
                         id: drawerToggleArea
                         anchors.fill: parent
-                        onClicked: root.toggleWidgets()
+                        property bool _twoTouched: false
+                        property bool _held: false
+                        touchPoints: [ TouchPoint { id: tp1 }, TouchPoint { id: tp2 } ]
+                        Timer {
+                            id: drawerHoldTimer
+                            interval: 380
+                            repeat: false
+                            onTriggered: {
+                                if (tp1.pressed && !tp2.pressed && !drawerToggleArea._twoTouched) {
+                                    drawerToggleArea._held = true;
+                                    root.toggleNotifications();
+                                }
+                            }
+                        }
+                        onPressed: {
+                            if (tp1.pressed && tp2.pressed) {
+                                drawerHoldTimer.stop();
+                                if (!_held) _twoTouched = true;
+                            } else if (tp1.pressed && !_twoTouched && !_held) {
+                                drawerHoldTimer.restart();
+                            }
+                        }
+                        onReleased: {
+                            if (!tp1.pressed && !tp2.pressed) {
+                                drawerHoldTimer.stop();
+                                if (_twoTouched) {
+                                    _twoTouched = false;
+                                    _held = false;
+                                    root.toggleNotifications();
+                                } else if (_held) {
+                                    _held = false;
+                                } else {
+                                    root.toggleWidgets();
+                                }
+                            }
+                        }
+                        onCanceled: {
+                            drawerHoldTimer.stop();
+                            _twoTouched = false;
+                            _held = false;
+                        }
                     }
                 }
 
@@ -906,10 +1032,48 @@ ShellRoot {
         exclusionMode: ExclusionMode.Ignore
         WlrLayershell.layer: WlrLayer.Overlay
 
-        WidgetsDrawerContent {
-            hub: hub
-            open: root.widgetsOpen
-            onCloseRequested: root.closeWidgets()
+        Loader {
+            anchors.fill: parent
+            active: root.widgetsEverOpened
+            sourceComponent: Component {
+                WidgetsDrawerContent {
+                    hub: root.hub
+                    open: root.widgetsOpen
+                    onCloseRequested: root.closeWidgets()
+                }
+            }
+        }
+    }
+
+    // Android Notifications Drawer (Same size as Widget Hub)
+    PanelWindow {
+        id: notifsPopup
+        anchors {
+            left: true
+            top: true
+            bottom: true
+        }
+        margins {
+            left: 140
+            top: 76
+            bottom: 12
+        }
+        implicitWidth: 844
+        visible: root.notifsActive
+        color: "transparent"
+        exclusionMode: ExclusionMode.Ignore
+        WlrLayershell.layer: WlrLayer.Overlay
+
+        Loader {
+            anchors.fill: parent
+            active: root.notifsEverOpened
+            sourceComponent: Component {
+                NotificationsDrawerContent {
+                    hub: root.hub
+                    open: root.notifsOpen
+                    onCloseRequested: root.closeNotifications()
+                }
+            }
         }
     }
 
@@ -925,7 +1089,7 @@ ShellRoot {
             bottom: 12
         }
         implicitWidth: 330
-        implicitHeight: 368
+        implicitHeight: 330
         visible: root.sessionActive
         color: "transparent"
         exclusionMode: ExclusionMode.Ignore
@@ -938,6 +1102,7 @@ ShellRoot {
                 { label: "Reload WM", icon: "", color: Theme.colTeal, cmd: root.isSway ? ["swaymsg", "reload"] : ["labwc", "--reconfigure"] },
                 { label: "Exit Wayland", icon: "", color: Theme.colRed, cmd: root.isSway ? ["swaymsg", "exit"] : ["labwc", "--exit"] }
             ]
+            onCloseRequested: root.closeSession()
             onActionTriggered: cmd => {
                 root.closeSession();
                 root.runCmd(cmd);

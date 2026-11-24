@@ -16,12 +16,17 @@ termux_reinstall/
 ├── configure.py       # Builds native binaries/cursors, installs PanVK/SwayFX releases, & deploys assets below
 ├── daemons/           # Native C daemons (qs_native.c, tgui_fix.c), Rust scaffold (qs-native-rs), wrappers & scripts
 ├── dotfiles/          # Zsh/Starship, Tmux, Termux, Lazygit, Neovim, Chromium, X11, Wayland (SwayFX/Sway/LabWC), & Quickshell configs
+├── benchmarks/        # Headless FPS, startup, and Quickshell panel profiling scripts
 └── .github/workflows/ # CI validation & aarch64-linux-android Rust cross-compilation
 ```
 
 ---
 
 ## 🚀 Install
+
+> [!IMPORTANT]
+> - **Newcomers:** Install the **GitHub release builds** of both [Termux](https://github.com/termux/termux-app/releases) and [Termux:X11](https://github.com/termux/termux-x11/releases) (do **not** use the Google Play Store builds).
+> - **Widgets requirement:** **Shizuku** and **Termux:API** (both the Android app and `termux-api` package) are required for the Quickshell widgets (MediaSession, Focus/DND, Calendar & Agenda, Wi-Fi scan/toggle, system diagnostics, and Android Notifications).
 
 Paste this into a fresh Termux session:
 
@@ -60,7 +65,8 @@ If a step fails, the script prints why, carries on, and lists every failed step 
 | **Font** | Installs JetBrainsMono Nerd Font (`~/.termux/font.ttf`), Catppuccin Mocha colors (`~/.termux/colors.properties`), and Termux app tweaks (`~/.termux/termux.properties`: `bell-character = ignore`, `hide-soft-keyboard-on-startup`, `volume-keys = volume`, `extra-keys = []`, `disable-hardware-keyboard-shortcuts = false`, `back-key=escape`) |
 | **Tmux** | Writes `~/.tmux.conf` (Catppuccin Mocha bar, mouse support, `Ctrl-a`/`Ctrl-b` prefix, `\|`/`-` splits, `Alt+Arrow` pane switching, `vi` copy mode with Android clipboard via `termux-clipboard-set`) |
 | **Git** | Configures `git-delta` side-by-side diffs with line numbers, `zdiff3` merge conflicts, and `diff.colorMoved` in `~/.gitconfig`, plus `delta` + Nerd Font icons in `~/.config/lazygit/config.yml` |
-| **x11** | Writes Catppuccin Mocha configs for X11 (`bspwm`, `sxhkd`, `polybar`, `quickshell` + QML `components/`, `fastcompmgr`, `rofi`, `xfce4-terminal`) and Wayland (`swayfx`, `sway`, `labwc`, `foot`, `quickshell`), installs touch-scaled Chromium wrapper & flags (`~/.local/bin/chromium`, `~/.config/chromium-flags.conf`, `~/.local/share/applications/chromium.desktop`, override scale with `CHROMIUM_SCALE`), plus Firefox `user.js`, compiles `~/.local/bin/qs-native` (native C daemons & persistent `rish` media-control pipe) and `~/.local/lib/libtgui_fix.so` (`--tgui` orientation/color shim), installs `~/.local/bin/rish` + Quickshell helpers (`weather.py`, `android_status.py`), builds `TouchDot-Mocha` cursor theme, and installs `~/start-x11.sh` (`desktop`) and `~/start-wayland.sh` (`desktop-wayland`) |
+| **X11** (`--x11`) | Deploys Catppuccin Mocha configs for `bspwm`, `sxhkd`, `polybar`, `quickshell` (`shell.qml` + `components/`), `fastcompmgr`, `rofi`, and `xfce4-terminal`, builds `TouchDot-Mocha` cursor theme, installs touch-scaled Chromium (`~/.local/bin/chromium`, `CHROMIUM_SCALE`) + Firefox `user.js`, compiles `~/.local/bin/qs-native` (native C daemons & persistent `rish` pipe), installs `~/.local/bin/rish` + Quickshell helpers (`weather.py`, `android_status.py`, `wifi.py`, `notifications.py`), and writes `~/start-x11.sh` (`desktop`) |
+| **Wayland** *(via `--x11`)* | Deploys Catppuccin Mocha configs for `swayfx`, `sway`, `labwc`, `foot`, and `quickshell` (`wayland.qml` top bar, touch dock, two-part expandable Widget Hub, and 2-finger/hold Android Notifications drawer), compiles `~/.local/lib/libtgui_fix.so` (`--tgui` orientation/color shim), and writes `~/start-wayland.sh` (`desktop-wayland`) |
 | **PanVK** (`--panvk` / `--gpu`) | Installs Mali PanVK ICD + `$PREFIX/lib/panvk-wsi/` symlinks + `~/.local/bin/gpu` from [`daz-9/termux-swayfx-panvk`](https://github.com/daz-9/termux-swayfx-panvk) and adds PanVK ICD env exports to `~/.zshrc` and `~/.bashrc` |
 | **SwayFX** (`--swayfx`) | Downloads & verifies the prebuilt patched `wlroots 0.20.2` / `scenefx 0.5.0` / `swayfx 0.6.1` release from [`daz-9/termux-swayfx-panvk`](https://github.com/daz-9/termux-swayfx-panvk) into `~/.local` and deploys `~/.config/swayfx/config` & `desktop-wayland` |
 

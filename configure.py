@@ -746,6 +746,8 @@ def configure_x11() -> int:
         (("dotfiles", "quickshell", "launch-wayland.sh"), "~/.config/quickshell/launch-wayland.sh", 0o755),
         (("daemons", "scripts", "quickshell", "android_status.py"), "~/.config/quickshell/scripts/android_status.py", 0o755),
         (("daemons", "scripts", "quickshell", "weather.py"), "~/.config/quickshell/scripts/weather.py", 0o755),
+        (("daemons", "scripts", "quickshell", "wifi.py"), "~/.config/quickshell/scripts/wifi.py", 0o755),
+        (("daemons", "scripts", "quickshell", "notifications.py"), "~/.config/quickshell/scripts/notifications.py", 0o755),
         (("dotfiles", "wayland", "sway", "config"), "~/.config/sway/config", 0o644),
         (("dotfiles", "wayland", "swayfx", "config"), "~/.config/swayfx/config", 0o644),
         (("dotfiles", "wayland", "labwc", "rc.xml"), "~/.config/labwc/rc.xml", 0o644),

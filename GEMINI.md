@@ -65,7 +65,7 @@ Use these exact tokens across Quickshell, Polybar, Rofi, `bspwm`, `sway`, `labwc
   - Top-to-bottom grouping separated by `60×2px` `#45475a` dividers:
     1. **Launchers:** App drawer (`rofi -show drun`), Terminal (`xfce4-terminal` on X11 / `foot` on Wayland), Window switcher (`rofi -show window`)
     2. **Workspaces `1`–`6` & Layout:** Live `bspc subscribe report` / Sway IPC / `ext_workspace_manager_v1` state (`focused` blue pill, `occupied` surface pill + `8px` blue dot, `empty` transparent), followed by Monocle/Tiled toggle (`M`/`T`) on X11
-    3. **Widgets toggle:** Opens the floating Widgets submenu (Termux:API & Shizuku status, Android Media/Spotify controls, Open-Meteo weather, Focus/DND, dynamic Calendar & Android Agenda)
+    3. **Widgets & Notifications toggle:** 1-finger tap opens the two-part floating Widget Hub (`WidgetsDrawerContent.qml`: upper part with Open-Meteo Weather + 3-day forecast, Focus/DND, Termux:API & Shizuku diagnostics, and Wi-Fi status/metrics/scanner; lower part with MediaSession and Calendar + merged Agenda; hold any card to expand, tap non-button area to collapse, swipe left to close, or swipe left/right on Calendar to step months). 2-finger tap or `380ms` hold opens the Android Notifications drawer (`NotificationsDrawerContent.qml`, powered by `notifications.py` via Termux:API + `rish`)
     4. **Spacer** (`Layout.fillHeight: true`)
     5. **Window actions:** Float toggle, Fullscreen toggle, Close window
     6. **Audio:** `+`, Mute/`%` badge, `-` (instant visual update on tap)

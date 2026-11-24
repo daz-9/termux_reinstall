@@ -1,11 +1,14 @@
 singleton Theme 1.0 Theme.qml
 DockButton 1.0 DockButton.qml
+CollapseButton 1.0 CollapseButton.qml
 WidgetHub 1.0 WidgetHub.qml
 WeatherCard 1.0 WeatherCard.qml
 FocusCard 1.0 FocusCard.qml
 AndroidStatusCard 1.0 AndroidStatusCard.qml
+WifiCard 1.0 WifiCard.qml
 MediaCard 1.0 MediaCard.qml
 CalendarCard 1.0 CalendarCard.qml
 AgendaCard 1.0 AgendaCard.qml
 WidgetsDrawerContent 1.0 WidgetsDrawerContent.qml
+NotificationsDrawerContent 1.0 NotificationsDrawerContent.qml
 SessionMenuContent 1.0 SessionMenuContent.qml

@@ -1,6 +1,7 @@
 #!/data/data/com.termux/files/usr/bin/python3
 """Fetch current weather via Open-Meteo with optional config/env overrides."""
 
+import datetime
 import json
 import os
 import sys
@@ -102,12 +103,52 @@ def build_api_url(lat: float, lon: float, tz: str) -> str:
         "latitude": lat,
         "longitude": lon,
         "current": "temperature_2m,apparent_temperature,relative_humidity_2m,is_day,weather_code,wind_speed_10m",
+        "daily": "weather_code,temperature_2m_max,temperature_2m_min",
+        "forecast_days": 4,
         "timezone": tz,
     })
     return f"https://api.open-meteo.com/v1/forecast?{query}"
 
 
-def _format_payload(cur: dict, location_label: str, stale: bool = False) -> dict:
+def _format_forecast(daily: dict | None) -> list[dict]:
+    if not isinstance(daily, dict):
+        return []
+    times = daily.get("time") or []
+    codes = daily.get("weather_code") or []
+    tmax = daily.get("temperature_2m_max") or []
+    tmin = daily.get("temperature_2m_min") or []
+
+    out = []
+    # Index 0 is today; take indices 1..3 for the next 3 days
+    for i in range(1, min(4, len(times))):
+        raw_date = str(times[i] or "")
+        try:
+            dt = datetime.date.fromisoformat(raw_date)
+            day_lbl = dt.strftime("%a")
+            date_lbl = dt.strftime("%-d %b")
+        except ValueError:
+            day_lbl = raw_date
+            date_lbl = ""
+
+        code = int(codes[i] or 0) if i < len(codes) and codes[i] is not None else 0
+        cond, icon_d, _icon_n, tone_d, _tone_n = WMO_MAP.get(
+            code, ("Cloudy", "\U000f0590", "\U000f0590", "subtext", "subtext")
+        )
+        hi = f"{round(float(tmax[i]))}°" if i < len(tmax) and tmax[i] is not None else "--°"
+        lo = f"{round(float(tmin[i]))}°" if i < len(tmin) and tmin[i] is not None else "--°"
+        out.append({
+            "day": day_lbl,
+            "date": date_lbl,
+            "icon": icon_d,
+            "tone": tone_d,
+            "cond": cond,
+            "hi": hi,
+            "lo": lo,
+        })
+    return out
+
+
+def _format_payload(cur: dict, location_label: str, stale: bool = False, daily: dict | None = None) -> dict:
     temp = cur.get("temperature_2m")
     feels = cur.get("apparent_temperature")
     code = int(cur.get("weather_code", 0) or 0)
@@ -143,6 +184,7 @@ def _format_payload(cur: dict, location_label: str, stale: bool = False) -> dict
         "detail": detail,
         "icon": icon,
         "tone": tone,
+        "forecast": _format_forecast(daily),
         "ts": int(time.time()),
     }
 
@@ -160,7 +202,7 @@ def _load_cached(lat: float, lon: float, label: str) -> dict | None:
             if "latitude" in cached and "longitude" in cached:
                 if abs(float(cached["latitude"]) - lat) > 0.05 or abs(float(cached["longitude"]) - lon) > 0.05:
                     continue
-            return _format_payload(cached["current"], label, stale=True)
+            return _format_payload(cached["current"], label, stale=True, daily=cached.get("daily"))
         except (OSError, ValueError, TypeError, json.JSONDecodeError):
             continue
     return None
@@ -174,14 +216,22 @@ def main() -> int:
         with urllib.request.urlopen(req, timeout=5.0) as resp:
             raw = json.loads(resp.read().decode("utf-8"))
         cur = raw.get("current") or {}
+        daily = raw.get("daily") or {}
         if not cur:
             raise ValueError("missing current weather")
-        payload = _format_payload(cur, label, stale=False)
+        payload = _format_payload(cur, label, stale=False, daily=daily)
         try:
             os.makedirs(CACHE_DIR, exist_ok=True)
             with open(CACHE_PATH, "w", encoding="utf-8") as f:
                 json.dump(
-                    {"latitude": lat, "longitude": lon, "label": label, "current": cur, "fetched_at": int(time.time())},
+                    {
+                        "latitude": lat,
+                        "longitude": lon,
+                        "label": label,
+                        "current": cur,
+                        "daily": daily,
+                        "fetched_at": int(time.time()),
+                    },
                     f,
                 )
         except OSError:
@@ -201,6 +251,7 @@ def main() -> int:
             "detail": "Tap to retry Open-Meteo",
             "icon": "\U000f0590",
             "tone": "subtext",
+            "forecast": [],
             "ts": 0,
         }), flush=True)
         return 0

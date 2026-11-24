@@ -16,10 +16,8 @@ Rectangle {
     implicitHeight: btn.buttonHeight
     radius: 18
     color: area.pressed ? Theme.colBlue : (btn.active ? btn.activeColor : btn.baseColor)
-    scale: area.pressed ? 0.92 : 1.0
 
-    Behavior on scale { NumberAnimation { duration: 80 } }
-    Behavior on color { ColorAnimation { duration: 100 } }
+    Behavior on color { ColorAnimation { duration: 80 } }
 
     Column {
         anchors.centerIn: parent

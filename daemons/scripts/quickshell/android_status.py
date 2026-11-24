@@ -1,5 +1,5 @@
 #!/data/data/com.termux/files/usr/bin/python3
-"""Probe Termux:API and Shizuku (rish / adbd) status and print one JSON object."""
+"""Probe Termux:API and Shizuku (rish / adbd) diagnostics and print one JSON object."""
 
 import concurrent.futures
 import json
@@ -9,6 +9,16 @@ import socket
 import subprocess
 import sys
 import time
+
+
+_API_CLIS = (
+    "termux-battery-status",
+    "termux-wifi-connectioninfo",
+    "termux-toast",
+    "termux-clipboard-get",
+    "termux-notification",
+    "termux-sensor",
+)
 
 
 def _getprop(name: str) -> str:
@@ -37,6 +47,9 @@ def _tcp_open(host: str, port: int, timeout_s: float = 0.2) -> bool:
 def _probe_termux_api() -> dict:
     bat_bin = shutil.which("termux-battery-status")
     ver = os.environ.get("TERMUX_API_VERSION", "")
+    cli_count = sum(1 for c in _API_CLIS if shutil.which(c))
+    api_cmds = f"{cli_count}/{len(_API_CLIS)} CLIs"
+
     if not bat_bin:
         return {
             "api_ok": False,
@@ -44,6 +57,9 @@ def _probe_termux_api() -> dict:
             "api_ver": ver,
             "api_ms": 0,
             "api_detail": "Install termux-api pkg",
+            "bat_power": "",
+            "bat_health": "",
+            "api_cmds": api_cmds,
         }
     t0 = time.monotonic()
     try:
@@ -59,12 +75,33 @@ def _probe_termux_api() -> dict:
             if temp is not None:
                 parts.append(f"{float(temp):.1f}°C")
             parts.append(f"{ms}ms")
+
+            power_parts = []
+            try:
+                mv = float(data.get("voltage", 0))
+                ua = float(data.get("current", 0))
+                if mv > 0:
+                    w = (mv / 1000.0) * (ua / 1_000_000.0)
+                    ma = round(ua / 1000.0)
+                    power_parts.append(f"{w:+.1f}W")
+                    power_parts.append(f"{mv / 1000.0:.2f}V")
+                    power_parts.append(f"{ma:+d}mA")
+            except (TypeError, ValueError):
+                pass
+
+            health = str(data.get("health", "") or "").upper()
+            plugged = str(data.get("plugged", "") or "").upper()
+            health_str = " · ".join(p for p in (health, plugged) if p)
+
             return {
                 "api_ok": True,
                 "api_state": "Ready",
                 "api_ver": ver,
                 "api_ms": ms,
                 "api_detail": " · ".join(parts),
+                "bat_power": " · ".join(power_parts),
+                "bat_health": health_str,
+                "api_cmds": api_cmds,
             }
         return {
             "api_ok": False,
@@ -72,6 +109,9 @@ def _probe_termux_api() -> dict:
             "api_ver": ver,
             "api_ms": ms,
             "api_detail": "Open Termux:API app",
+            "bat_power": "",
+            "bat_health": "",
+            "api_cmds": api_cmds,
         }
     except subprocess.TimeoutExpired:
         return {
@@ -80,6 +120,9 @@ def _probe_termux_api() -> dict:
             "api_ver": ver,
             "api_ms": 2500,
             "api_detail": "Bridge timed out (>2.5s)",
+            "bat_power": "",
+            "bat_health": "",
+            "api_cmds": api_cmds,
         }
     except (OSError, ValueError, TypeError, json.JSONDecodeError):
         return {
@@ -88,6 +131,9 @@ def _probe_termux_api() -> dict:
             "api_ver": ver,
             "api_ms": 0,
             "api_detail": "Bridge error",
+            "bat_power": "",
+            "bat_health": "",
+            "api_cmds": api_cmds,
         }
 
 
@@ -98,6 +144,19 @@ def _probe_shizuku() -> dict:
     tcp_prop = _getprop("service.adb.tcp.port")
     adb_port = int(tcp_prop) if tcp_prop.isdigit() and int(tcp_prop) > 0 else 5555
     adb_tcp_open = _tcp_open("127.0.0.1", adb_port)
+    rel = _getprop("ro.build.version.release")
+    sdk = _getprop("ro.build.version.sdk")
+    android_ver = f"Android {rel} (API {sdk})" if rel and sdk else (f"Android {rel}" if rel else "")
+
+    base_diag = {
+        "shz_rss_mb": 0,
+        "shz_uptime": "",
+        "adbd_state": adbd_svc,
+        "adb_wifi": "",
+        "selinux": "",
+        "android_ver": android_ver,
+        "dex_mode": "",
+    }
 
     if not os.path.exists(dex_path):
         detail = f"adbd {adbd_svc}" + (f" · :{adb_port} open" if adb_tcp_open else "")
@@ -111,15 +170,20 @@ def _probe_shizuku() -> dict:
             "adb_port": adb_port,
             "shizuku_detail": f"No rish · {detail}",
             "api_ver_pkg": "",
+            **base_diag,
         }
 
     # Android 14+ aborts app_process if the dex file is writable by owner.
+    dex_mode = ""
     try:
         mode = os.stat(dex_path).st_mode & 0o777
         if mode & 0o222:
             os.chmod(dex_path, 0o400)
+            mode = 0o400
+        dex_mode = f"{mode:04o}"
     except OSError:
         pass
+    base_diag["dex_mode"] = dex_mode
 
     env = os.environ.copy()
     env.pop("LD_LIBRARY_PATH", None)
@@ -128,9 +192,11 @@ def _probe_shizuku() -> dict:
 
     probe_cmd = (
         "echo UID:$(id -u); "
-        "ps -A -o PID,NAME 2>/dev/null | grep -m1 shizuku_server | sed 's/^/SHZ_PS:/'; "
+        "ps -A -o PID,RSS,ETIME,NAME 2>/dev/null | grep -m1 shizuku_server | sed 's/^/SHZ_PS:/'; "
         "dumpsys package moe.shizuku.privileged.api 2>/dev/null | grep -m1 versionName= | sed 's/^/SHZ_VER:/'; "
-        "dumpsys package com.termux.api 2>/dev/null | grep -m1 versionName= | sed 's/^/API_VER:/'"
+        "dumpsys package com.termux.api 2>/dev/null | grep -m1 versionName= | sed 's/^/API_VER:/'; "
+        "echo SE:$(getenforce 2>/dev/null); "
+        "echo ADBW:$(settings get global adb_wifi_enabled 2>/dev/null)"
     )
     app_proc = "/system/bin/app_process"
     if not os.path.exists(app_proc):
@@ -166,6 +232,7 @@ def _probe_shizuku() -> dict:
             "adb_port": adb_port,
             "shizuku_detail": f"Timed out · {detail}",
             "api_ver_pkg": "",
+            **base_diag,
         }
     except OSError as e:
         return {
@@ -178,6 +245,7 @@ def _probe_shizuku() -> dict:
             "adb_port": adb_port,
             "shizuku_detail": str(e)[:42],
             "api_ver_pkg": "",
+            **base_diag,
         }
 
     uid = -1
@@ -194,10 +262,20 @@ def _probe_shizuku() -> dict:
             toks = line[7:].strip().split()
             if toks and toks[0].isdigit():
                 pid = int(toks[0])
+            if len(toks) >= 2 and toks[1].isdigit():
+                base_diag["shz_rss_mb"] = round(int(toks[1]) / 1024.0)
+            if len(toks) >= 3:
+                base_diag["shz_uptime"] = toks[2]
         elif line.startswith("SHZ_VER:") and "versionName=" in line:
             shizuku_ver = line.split("versionName=", 1)[1].strip()
         elif line.startswith("API_VER:") and "versionName=" in line:
             api_ver_pkg = line.split("versionName=", 1)[1].strip()
+        elif line.startswith("SE:"):
+            base_diag["selinux"] = line[3:].strip()
+        elif line.startswith("ADBW:"):
+            val = line[5:].strip()
+            if val in ("0", "1"):
+                base_diag["adb_wifi"] = "On" if val == "1" else "Off"
 
     if res.returncode == 0 and uid in (0, 2000):
         mode_lbl = "Root" if uid == 0 else "ADB"
@@ -216,6 +294,7 @@ def _probe_shizuku() -> dict:
             "adb_port": adb_port,
             "shizuku_detail": " · ".join(detail_parts),
             "api_ver_pkg": api_ver_pkg,
+            **base_diag,
         }
 
     low = out.lower()
@@ -236,10 +315,28 @@ def _probe_shizuku() -> dict:
         "adb_port": adb_port,
         "shizuku_detail": detail,
         "api_ver_pkg": api_ver_pkg,
+        **base_diag,
     }
 
 
 def main() -> int:
+    cmd = sys.argv[1] if len(sys.argv) > 1 else "probe"
+    am_bin = shutil.which("am") or "/system/bin/am"
+    if cmd == "open-shizuku":
+        subprocess.Popen(
+            [am_bin, "start", "-n", "moe.shizuku.privileged.api/moe.shizuku.manager.MainActivity"],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+        return 0
+    if cmd == "dev-settings":
+        subprocess.Popen(
+            [am_bin, "start", "-a", "android.settings.APPLICATION_DEVELOPMENT_SETTINGS"],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+        return 0
+
     with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:
         f_api = pool.submit(_probe_termux_api)
         f_shz = pool.submit(_probe_shizuku)

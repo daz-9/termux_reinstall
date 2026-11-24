@@ -5,20 +5,52 @@ Item {
     property bool open: false
     property var items: []
     signal actionTriggered(var cmd)
+    signal closeRequested()
 
     anchors.fill: parent
     clip: true
 
+    onOpenChanged: {
+        if (!open) menuCard.swipeY = 0;
+    }
+
     Rectangle {
+        id: menuCard
+        property real swipeY: 0
         width: parent.width
         height: 330
-        y: menuRoot.open ? 0 : parent.height
+        y: (menuRoot.open ? 0 : parent.height) + swipeY
         radius: 22
         color: Theme.colPopupBase
         border.color: Theme.colSurface1
         border.width: 2
 
-        Behavior on y { NumberAnimation { duration: 140; easing.type: Easing.OutCubic } }
+        Behavior on y {
+            enabled: !sessionDrag.active
+            NumberAnimation { duration: 140; easing.type: Easing.OutCubic }
+        }
+
+        DragHandler {
+            id: sessionDrag
+            target: null
+            xAxis.enabled: false
+            yAxis.enabled: true
+            onTranslationChanged: {
+                if (menuRoot.open) {
+                    menuCard.swipeY = Math.max(0, translation.y);
+                }
+            }
+            onActiveChanged: {
+                if (!active && menuRoot.open) {
+                    if (menuCard.swipeY > 64) {
+                        menuCard.swipeY = 0;
+                        menuRoot.closeRequested();
+                    } else {
+                        menuCard.swipeY = 0;
+                    }
+                }
+            }
+        }
 
         Column {
             anchors.fill: parent

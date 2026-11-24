@@ -7,14 +7,15 @@ import "./components"
 ShellRoot {
     id: root
 
-    property var desktopStates: [
-        { num: 1, focused: true, occupied: false, urgent: false },
-        { num: 2, focused: false, occupied: false, urgent: false },
-        { num: 3, focused: false, occupied: false, urgent: false },
-        { num: 4, focused: false, occupied: false, urgent: false },
-        { num: 5, focused: false, occupied: false, urgent: false },
-        { num: 6, focused: false, occupied: false, urgent: false }
-    ]
+    ListModel {
+        id: desktopModel
+        ListElement { num: 1; focused: true; occupied: false; urgent: false }
+        ListElement { num: 2; focused: false; occupied: false; urgent: false }
+        ListElement { num: 3; focused: false; occupied: false; urgent: false }
+        ListElement { num: 4; focused: false; occupied: false; urgent: false }
+        ListElement { num: 5; focused: false; occupied: false; urgent: false }
+        ListElement { num: 6; focused: false; occupied: false; urgent: false }
+    }
     property string layoutMode: "T"
     property int volumePct: 50
     property bool muted: false
@@ -23,6 +24,28 @@ ShellRoot {
     property bool sessionActive: false
     property bool widgetsOpen: false
     property bool widgetsActive: false
+    property bool widgetsEverOpened: false
+    property bool notifsOpen: false
+    property bool notifsActive: false
+    property bool notifsEverOpened: false
+    readonly property alias hub: widgetHub
+
+    function syncDesktopStates(next) {
+        if (next.length === desktopModel.count) {
+            for (let i = 0; i < next.length; i++) {
+                const cur = desktopModel.get(i);
+                const nxt = next[i];
+                if (cur.num !== nxt.num || cur.focused !== nxt.focused || cur.occupied !== nxt.occupied || cur.urgent !== nxt.urgent) {
+                    desktopModel.set(i, nxt);
+                }
+            }
+        } else {
+            desktopModel.clear();
+            for (let i = 0; i < next.length; i++) {
+                desktopModel.append(next[i]);
+            }
+        }
+    }
 
     function runCmd(cmd) {
         Quickshell.execDetached(cmd);
@@ -39,7 +62,9 @@ ShellRoot {
             closeWidgets();
         } else {
             closeSession();
+            closeNotifications();
             widgetsCloseTimer.stop();
+            root.widgetsEverOpened = true;
             root.widgetsActive = true;
             root.widgetsOpen = true;
             hub.onWidgetsOpened();
@@ -54,11 +79,34 @@ ShellRoot {
         syncWatcher();
     }
 
+    function toggleNotifications() {
+        if (root.notifsOpen) {
+            closeNotifications();
+        } else {
+            closeSession();
+            closeWidgets();
+            notifsCloseTimer.stop();
+            root.notifsEverOpened = true;
+            root.notifsActive = true;
+            root.notifsOpen = true;
+            hub.onNotifsOpened();
+            syncWatcher();
+        }
+    }
+
+    function closeNotifications() {
+        if (!root.notifsOpen && !root.notifsActive) return;
+        root.notifsOpen = false;
+        notifsCloseTimer.restart();
+        syncWatcher();
+    }
+
     function toggleSession() {
         if (root.sessionOpen) {
             closeSession();
         } else {
             closeWidgets();
+            closeNotifications();
             sessionCloseTimer.stop();
             root.sessionActive = true;
             root.sessionOpen = true;
@@ -75,12 +123,13 @@ ShellRoot {
 
     function closeAllMenus() {
         closeWidgets();
+        closeNotifications();
         closeSession();
     }
 
     function syncWatcher() {
         submenuWatcher.running = false;
-        if (root.widgetsOpen || root.sessionOpen) {
+        if (root.widgetsOpen || root.notifsOpen || root.sessionOpen) {
             watcherRestartTimer.restart();
         } else {
             watcherRestartTimer.stop();
@@ -111,21 +160,31 @@ ShellRoot {
             }
         }
         if (next.length > 0) {
-            root.desktopStates = next;
+            root.syncDesktopStates(next);
         }
     }
 
     WidgetHub {
-        id: hub
+        id: widgetHub
         widgetsOpen: root.widgetsOpen
+        notifsOpen: root.notifsOpen
     }
 
     Timer {
         id: widgetsCloseTimer
-        interval: 170
+        interval: 120
         repeat: false
         onTriggered: {
             if (!root.widgetsOpen) root.widgetsActive = false;
+        }
+    }
+
+    Timer {
+        id: notifsCloseTimer
+        interval: 120
+        repeat: false
+        onTriggered: {
+            if (!root.notifsOpen) root.notifsActive = false;
         }
     }
 
@@ -143,7 +202,7 @@ ShellRoot {
         interval: 30
         repeat: false
         onTriggered: {
-            if (root.widgetsOpen || root.sessionOpen) {
+            if (root.widgetsOpen || root.notifsOpen || root.sessionOpen) {
                 submenuWatcher.running = true;
             }
         }
@@ -157,9 +216,9 @@ ShellRoot {
             String(dockWindow.width),
             String(dockWindow.height > 0 ? dockWindow.height : 1508),
             String(dockWindow.width + 12),
-            String(root.widgetsOpen ? 80 : Math.max(80, 80 + (dockWindow.height > 0 ? dockWindow.height : 1508) - 368)),
-            String(root.widgetsOpen ? widgetsPopup.implicitWidth : sessionPopup.implicitWidth),
-            String(root.widgetsOpen ? widgetsPopup.implicitHeight : sessionPopup.implicitHeight)
+            String((root.widgetsOpen || root.notifsOpen) ? 80 : Math.max(80, 80 + (dockWindow.height > 0 ? dockWindow.height : 1508) - 330)),
+            String((root.widgetsOpen || root.notifsOpen) ? widgetsPopup.implicitWidth : sessionPopup.implicitWidth),
+            String((root.widgetsOpen || root.notifsOpen) ? widgetsPopup.implicitHeight : sessionPopup.implicitHeight)
         ]
         stdout: SplitParser {
             onRead: data => {
@@ -197,11 +256,27 @@ ShellRoot {
         }
     }
 
-    Timer {
-        interval: 4000
+    Process {
+        id: pactlSubProc
+        command: ["pactl", "subscribe"]
         running: true
+        stdout: SplitParser {
+            onRead: line => {
+                if (line.indexOf("on sink") >= 0) {
+                    root.refreshAudio();
+                }
+            }
+        }
+    }
+
+    Timer {
+        interval: 10000
+        running: !pactlSubProc.running
         repeat: true
-        onTriggered: root.refreshAudio()
+        onTriggered: {
+            pactlSubProc.running = true;
+            root.refreshAudio();
+        }
     }
 
     Timer {
@@ -294,36 +369,37 @@ ShellRoot {
                     spacing: dockWindow.compactDock ? 5 : 12
 
                     Repeater {
-                        model: root.desktopStates
+                        model: desktopModel
                         delegate: Rectangle {
-                            required property var modelData
+                            required property int num
+                            required property bool focused
+                            required property bool occupied
+                            required property bool urgent
                             width: 92
                             height: dockWindow.compactDock ? 36 : 58
                             radius: 18
-                            scale: wsArea.pressed ? 0.92 : 1.0
-                            color: modelData.focused
+                            color: focused
                                 ? Theme.colBlue
-                                : (modelData.urgent
+                                : (urgent
                                     ? Theme.colRed
-                                    : (modelData.occupied ? Theme.colSurface : "transparent"))
-                            border.color: (!modelData.focused && modelData.occupied) ? Theme.colSurface1 : "transparent"
+                                    : (occupied ? Theme.colSurface : "transparent"))
+                            border.color: (!focused && occupied) ? Theme.colSurface1 : "transparent"
                             border.width: 1
 
-                            Behavior on scale { NumberAnimation { duration: 80 } }
-                            Behavior on color { ColorAnimation { duration: 100 } }
+                            Behavior on color { ColorAnimation { duration: 80 } }
 
                             Row {
                                 anchors.centerIn: parent
                                 spacing: 6
                                 Text {
-                                    text: String(modelData.num)
-                                    color: (modelData.focused || modelData.urgent) ? Theme.colDark : (modelData.occupied ? Theme.colText : Theme.colSubtext)
+                                    text: String(num)
+                                    color: (focused || urgent) ? Theme.colDark : (occupied ? Theme.colText : Theme.colSubtext)
                                     font.family: Theme.uiFont
                                     font.pixelSize: dockWindow.compactDock ? 18 : 24
-                                    font.bold: modelData.focused || modelData.occupied
+                                    font.bold: focused || occupied
                                 }
                                 Rectangle {
-                                    visible: modelData.occupied && !modelData.focused
+                                    visible: occupied && !focused
                                     anchors.verticalCenter: parent.verticalCenter
                                     width: 8
                                     height: 8
@@ -339,7 +415,7 @@ ShellRoot {
                                 anchors.rightMargin: -12
                                 anchors.topMargin: -4
                                 anchors.bottomMargin: -4
-                                onClicked: root.runCmd(["bspc", "desktop", "-f", "^" + modelData.num])
+                                onClicked: root.runCmd(["bspc", "desktop", "-f", "^" + num])
                             }
                         }
                     }
@@ -354,11 +430,11 @@ ShellRoot {
                     }
                 }
 
-                // Empty Dock Spacer -> Click to Toggle Widget Drawer
+                // Empty Dock Spacer -> 1-touch Widget Hub, 2-touch Notifications
                 Item {
                     Layout.fillWidth: true
                     Layout.fillHeight: true
-                    Layout.minimumHeight: dockWindow.compactDock ? 32 : 60
+                    Layout.minimumHeight: dockWindow.compactDock ? 38 : 68
 
                     Column {
                         anchors.centerIn: parent
@@ -373,17 +449,64 @@ ShellRoot {
                         Rectangle {
                             anchors.horizontalCenter: parent.horizontalCenter
                             width: 6
-                            height: dockWindow.compactDock ? 20 : 44
+                            height: dockWindow.compactDock ? 18 : 38
                             radius: 3
-                            color: root.widgetsOpen ? Theme.colBlue : Theme.colSurface1
+                            color: root.widgetsOpen ? Theme.colBlue : (root.notifsOpen ? Theme.colMauve : Theme.colSurface1)
                             Behavior on color { ColorAnimation { duration: 120 } }
+                        }
+                        Text {
+                            anchors.horizontalCenter: parent.horizontalCenter
+                            text: root.notifsOpen ? "󰄽" : "󰄾"
+                            color: root.notifsOpen ? Theme.colMauve : Theme.colSubtext
+                            font.family: Theme.uiFont
+                            font.pixelSize: 20
                         }
                     }
 
-                    MouseArea {
+                    MultiPointTouchArea {
                         id: drawerToggleArea
                         anchors.fill: parent
-                        onClicked: root.toggleWidgets()
+                        property bool _twoTouched: false
+                        property bool _held: false
+                        touchPoints: [ TouchPoint { id: tp1 }, TouchPoint { id: tp2 } ]
+                        Timer {
+                            id: drawerHoldTimer
+                            interval: 380
+                            repeat: false
+                            onTriggered: {
+                                if (tp1.pressed && !tp2.pressed && !drawerToggleArea._twoTouched) {
+                                    drawerToggleArea._held = true;
+                                    root.toggleNotifications();
+                                }
+                            }
+                        }
+                        onPressed: {
+                            if (tp1.pressed && tp2.pressed) {
+                                drawerHoldTimer.stop();
+                                if (!_held) _twoTouched = true;
+                            } else if (tp1.pressed && !_twoTouched && !_held) {
+                                drawerHoldTimer.restart();
+                            }
+                        }
+                        onReleased: {
+                            if (!tp1.pressed && !tp2.pressed) {
+                                drawerHoldTimer.stop();
+                                if (_twoTouched) {
+                                    _twoTouched = false;
+                                    _held = false;
+                                    root.toggleNotifications();
+                                } else if (_held) {
+                                    _held = false;
+                                } else {
+                                    root.toggleWidgets();
+                                }
+                            }
+                        }
+                        onCanceled: {
+                            drawerHoldTimer.stop();
+                            _twoTouched = false;
+                            _held = false;
+                        }
                     }
                 }
 
@@ -487,10 +610,40 @@ ShellRoot {
         visible: root.widgetsActive
         color: "transparent"
 
-        WidgetsDrawerContent {
-            hub: hub
-            open: root.widgetsOpen
-            onCloseRequested: root.closeWidgets()
+        Loader {
+            anchors.fill: parent
+            active: root.widgetsEverOpened
+            sourceComponent: Component {
+                WidgetsDrawerContent {
+                    hub: root.hub
+                    open: root.widgetsOpen
+                    onCloseRequested: root.closeWidgets()
+                }
+            }
+        }
+    }
+
+    // Android Notifications Drawer (Same size as Widget Hub)
+    PopupWindow {
+        id: notifsPopup
+        anchor.window: dockWindow
+        anchor.rect.x: dockWindow.width + 12
+        anchor.rect.y: 0
+        implicitWidth: 844
+        implicitHeight: dockWindow.height > 0 ? dockWindow.height : 1504
+        visible: root.notifsActive
+        color: "transparent"
+
+        Loader {
+            anchors.fill: parent
+            active: root.notifsEverOpened
+            sourceComponent: Component {
+                NotificationsDrawerContent {
+                    hub: root.hub
+                    open: root.notifsOpen
+                    onCloseRequested: root.closeNotifications()
+                }
+            }
         }
     }
 
@@ -499,9 +652,9 @@ ShellRoot {
         id: sessionPopup
         anchor.window: dockWindow
         anchor.rect.x: dockWindow.width + 12
-        anchor.rect.y: Math.max(0, (dockWindow.height > 0 ? dockWindow.height : 1504) - 368)
+        anchor.rect.y: Math.max(0, (dockWindow.height > 0 ? dockWindow.height : 1504) - 330)
         implicitWidth: 330
-        implicitHeight: 368
+        implicitHeight: 330
         visible: root.sessionActive
         color: "transparent"
 
@@ -512,6 +665,7 @@ ShellRoot {
                 { label: "Restart WM", icon: "", color: Theme.colTeal, cmd: ["bspc", "wm", "-r"] },
                 { label: "Exit X11", icon: "", color: Theme.colRed, cmd: ["bspc", "quit"] }
             ]
+            onCloseRequested: root.closeSession()
             onActionTriggered: cmd => {
                 root.closeSession();
                 root.runCmd(cmd);
