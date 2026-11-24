@@ -41,16 +41,16 @@ Use these exact tokens across Quickshell, Polybar, Rofi, `bspwm`, `sway`, `labwc
 ## 3. Geometry, Radii & Compositing
 
 - **Radii scale:**
-  - Windows (`labwc`): `corner-radius = 16`
+  - Windows (`swayfx`, `labwc`): `corner_radius 24` / `corner-radius = 24`, `2px` `#313244` border (matching the Quickshell left dock)
   - Dock container: `24px` (`2px` `#313244` border)
   - Popup container: `22px` (`2px` `#45475a` border)
   - Buttons / workspace pills / Rofi window: `16–18px`
   - Top Polybar: `height = 40pt`, `radius = 16`, `border-size = 8pt` transparent outer margin (`~73px` top strut)
-  - `bspwm` / `sway` / `labwc`: `window_gap = 12`, `border_width = 2`
+  - `bspwm` / `sway` / `swayfx` / `labwc`: `window_gap = 12`, `border_width = 2`
 - **Transparency & compositors:**
   - X11 (`bspwmrc`) uses `fastcompmgr` for lightweight Termux:X11 compositing.
   - Ensure a compositor is running before launching `quickshell` so translucent ARGB dock/popup surfaces render cleanly.
-  - Wayland (`start-wayland.sh`) supports `sway` and `labwc` over `--x11` (nested Termux:X11) or `--tgui` (Termux:GUI with `~/.local/lib/libtgui_fix.so` fixing ABGR format and `WL_OUTPUT_TRANSFORM_FLIPPED_180`).
+  - Wayland (`start-wayland.sh`) defaults to hardware-accelerated `swayfx` (`WLR_RENDERER=gles2`, `GALLIUM_DRIVER=zink`, PanVK ICD, `WLR_GLES2_NO_DMABUF=1`, `corner_radius 24`, blur/shadows disabled) and also supports `sway` and `labwc` over `--x11` (nested Termux:X11) or `--tgui` (Termux:GUI with `~/.local/lib/libtgui_fix.so` fixing ABGR format and `WL_OUTPUT_TRANSFORM_FLIPPED_180`). Prebuilt patched `wlroots`/`scenefx`/`swayfx` binaries and PanVK tooling live in [`daz-9/termux-swayfx-panvk`](https://github.com/daz-9/termux-swayfx-panvk) and install into `~/.local`.
 
 ---
 

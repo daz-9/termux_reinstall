@@ -30,15 +30,20 @@ trap cleanup EXIT INT TERM
 # Clean up stale X11 / WM / VirGL processes from an earlier session
 [ -f "$TMPDIR/qs-watch.pid" ] && kill "$(cat "$TMPDIR/qs-watch.pid")" 2>/dev/null || true
 rm -f "$TMPDIR/qs-watch.pid"
-kill_procs quickshell qs-native polybar fastcompmgr sxhkd bspwm termux-x11 virgl_test_serv
+HAD_STALE=0
+for proc in quickshell qs-native polybar fastcompmgr sxhkd bspwm termux-x11 virgl_test_serv; do
+  if pkill -x "$proc" 2>/dev/null; then
+    HAD_STALE=1
+  fi
+done
 [ -f "$TMPDIR/hide-cursor.pid" ] && kill "$(cat "$TMPDIR/hide-cursor.pid")" 2>/dev/null || true
-pkill -f '[v]irgl_test_server_android' 2>/dev/null || true
-pkill -f "com.termux.x11" 2>/dev/null || true
+if pkill -f '[v]irgl_test_server_android' 2>/dev/null; then HAD_STALE=1; fi
+if pkill -f "com.termux.x11" 2>/dev/null; then HAD_STALE=1; fi
 rm -f "$XDG_RUNTIME_DIR/.virgl_test" "$BSPWM_SOCKET" "$XDG_RUNTIME_DIR/.X11-unix/X0"
 if ! pgrep -x chrome >/dev/null 2>&1; then
   rm -f "$XDG_CONFIG_HOME/chromium/SingletonLock" "$XDG_CONFIG_HOME/chromium/SingletonSocket" "$XDG_CONFIG_HOME/chromium/SingletonCookie"
 fi
-sleep 0.5
+[ "$HAD_STALE" -eq 1 ] && sleep 0.15
 
 # Hardware OpenGL ES -> Vulkan passthrough via ANGLE for Qt Quick / GL apps
 if command -v virgl_test_server_android >/dev/null 2>&1; then
@@ -52,11 +57,11 @@ if command -v virgl_test_server_android >/dev/null 2>&1; then
 fi
 
 if command -v pulseaudio >/dev/null 2>&1; then
-  pulseaudio --start --exit-idle-time=-1 2>/dev/null || true
+  pulseaudio --start --exit-idle-time=-1 >/dev/null 2>&1 &
 fi
 
 # Open the Termux:X11 Android activity
-am start --user 0 -n com.termux.x11/com.termux.x11.MainActivity >/dev/null 2>&1 || true
+am start --user 0 -n com.termux.x11/com.termux.x11.MainActivity >/dev/null 2>&1 &
 
 # Launch X11 and start bspwm once :0 is ready
 if command -v dbus-launch >/dev/null 2>&1; then

@@ -3,6 +3,7 @@ import QtQuick.Layouts
 
 Rectangle {
     required property var hub
+    readonly property var visibleEvents: hub.filteredAgendaEvents()
 
     Layout.fillWidth: true
     Layout.fillHeight: true
@@ -73,7 +74,7 @@ Rectangle {
         }
 
         Repeater {
-            model: hub.filteredAgendaEvents()
+            model: visibleEvents
             delegate: Rectangle {
                 required property var modelData
                 width: parent.width
@@ -107,7 +108,7 @@ Rectangle {
         }
 
         Rectangle {
-            visible: hub.filteredAgendaEvents().length === 0
+            visible: visibleEvents.length === 0
             width: parent.width
             height: 54
             radius: 14

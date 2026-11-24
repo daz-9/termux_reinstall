@@ -1,0 +1,32 @@
+/* Catppuccin Mocha scrollbar styling for xfce4-terminal (GTK3) */
+.xfce4-terminal scrollbar,
+terminal-window scrollbar {
+    background-color: #313244;
+    border: none;
+}
+
+.xfce4-terminal scrollbar trough,
+terminal-window scrollbar trough {
+    background-color: #313244;
+    border: none;
+    border-radius: 6px;
+}
+
+.xfce4-terminal scrollbar slider,
+terminal-window scrollbar slider {
+    background-color: #cba6f7;
+    border: 2px solid #313244;
+    border-radius: 6px;
+    min-width: 10px;
+    min-height: 24px;
+}
+
+.xfce4-terminal scrollbar slider:hover,
+terminal-window scrollbar slider:hover {
+    background-color: #d9bcf9;
+}
+
+.xfce4-terminal scrollbar slider:active,
+terminal-window scrollbar slider:active {
+    background-color: #f5c2e7;
+}

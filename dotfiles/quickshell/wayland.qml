@@ -41,6 +41,7 @@ ShellRoot {
     property bool sessionActive: false
     property bool widgetsOpen: false
     property bool widgetsActive: false
+    property bool backdropActive: false
 
     function runCmd(cmd) {
         Quickshell.execDetached(cmd);
@@ -82,12 +83,14 @@ ShellRoot {
             widgetsCloseTimer.stop();
             root.widgetsActive = true;
             root.widgetsOpen = true;
+            backdropShowTimer.restart();
             hub.onWidgetsOpened();
         }
     }
 
     function closeWidgets() {
         if (!root.widgetsOpen && !root.widgetsActive) return;
+        backdropShowTimer.stop();
         root.widgetsOpen = false;
         widgetsCloseTimer.restart();
     }
@@ -100,11 +103,13 @@ ShellRoot {
             sessionCloseTimer.stop();
             root.sessionActive = true;
             root.sessionOpen = true;
+            backdropShowTimer.restart();
         }
     }
 
     function closeSession() {
         if (!root.sessionOpen && !root.sessionActive) return;
+        backdropShowTimer.stop();
         root.sessionOpen = false;
         sessionCloseTimer.restart();
     }
@@ -120,20 +125,37 @@ ShellRoot {
     }
 
     Timer {
-        id: widgetsCloseTimer
-        interval: 190
+        id: backdropShowTimer
+        interval: 175
         repeat: false
         onTriggered: {
-            if (!root.widgetsOpen) root.widgetsActive = false;
+            if (root.widgetsOpen || root.sessionOpen) {
+                root.backdropActive = true;
+            }
+        }
+    }
+
+    Timer {
+        id: widgetsCloseTimer
+        interval: 170
+        repeat: false
+        onTriggered: {
+            if (!root.widgetsOpen) {
+                root.widgetsActive = false;
+                if (!root.sessionActive) root.backdropActive = false;
+            }
         }
     }
 
     Timer {
         id: sessionCloseTimer
-        interval: 170
+        interval: 150
         repeat: false
         onTriggered: {
-            if (!root.sessionOpen) root.sessionActive = false;
+            if (!root.sessionOpen) {
+                root.sessionActive = false;
+                if (!root.widgetsActive) root.backdropActive = false;
+            }
         }
     }
 
@@ -849,7 +871,7 @@ ShellRoot {
             top: true
             bottom: true
         }
-        visible: root.widgetsActive || root.sessionActive
+        visible: root.backdropActive
         color: "transparent"
         exclusionMode: ExclusionMode.Ignore
         WlrLayershell.layer: WlrLayer.Top

@@ -3,7 +3,7 @@ padding.width: 6
 padding.height: 6
 window.active.title.bg.color: #1e1e2e
 window.active.label.text.color: #cdd6f4
-window.active.border.color: #89b4fa
+window.active.border.color: #313244
 window.inactive.title.bg.color: #181825
 window.inactive.label.text.color: #a6adc8
 window.inactive.border.color: #313244

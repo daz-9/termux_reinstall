@@ -133,6 +133,7 @@ jobs:
             "$FAKE_HOME/.local/bin/rish" \
             "$FAKE_HOME/.local/bin/chromium" \
             "$FAKE_HOME/.local/bin/chromium-browser" \
+            "$FAKE_HOME/.config/swayfx/config" \
             "$FAKE_HOME/.config/chromium-flags.conf" \
             "$FAKE_HOME/.local/share/applications/chromium.desktop" \
             "$FAKE_HOME/.config/quickshell/shell.qml" \

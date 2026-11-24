@@ -122,7 +122,7 @@ ShellRoot {
 
     Timer {
         id: widgetsCloseTimer
-        interval: 190
+        interval: 170
         repeat: false
         onTriggered: {
             if (!root.widgetsOpen) root.widgetsActive = false;
@@ -131,7 +131,7 @@ ShellRoot {
 
     Timer {
         id: sessionCloseTimer
-        interval: 170
+        interval: 150
         repeat: false
         onTriggered: {
             if (!root.sessionOpen) root.sessionActive = false;

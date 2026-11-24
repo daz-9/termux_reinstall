@@ -14,15 +14,13 @@ Item {
         id: drawerBg
         width: parent.width
         height: parent.height
-        x: drawerRoot.open ? 0 : -44
-        opacity: drawerRoot.open ? 1.0 : 0.0
+        x: drawerRoot.open ? 0 : -parent.width
         radius: 24
         color: Theme.colPopupBase
         border.color: Theme.colSurface1
         border.width: 2
 
-        Behavior on x { NumberAnimation { duration: 180; easing.type: Easing.OutCubic } }
-        Behavior on opacity { NumberAnimation { duration: 140 } }
+        Behavior on x { NumberAnimation { duration: 160; easing.type: Easing.OutCubic } }
 
         Flickable {
             anchors.fill: parent

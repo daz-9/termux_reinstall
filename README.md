@@ -13,9 +13,9 @@ Turns a fresh Termux install into a **C/C++ dev environment** (with Python, C#, 
 termux_reinstall/
 ├── main.py            # Interactive Setup/Configure menu & CLI dispatcher
 ├── setup.py           # Core & X11/Wayland pkg / toolchain installer
-├── configure.py       # Builds native binaries/cursors & deploys assets below
+├── configure.py       # Builds native binaries/cursors, installs PanVK/SwayFX releases, & deploys assets below
 ├── daemons/           # Native C daemons (qs_native.c, tgui_fix.c), Rust scaffold (qs-native-rs), wrappers & scripts
-├── dotfiles/          # Zsh/Starship, Tmux, Termux, Lazygit, Neovim, Chromium, X11, Wayland, & Quickshell configs
+├── dotfiles/          # Zsh/Starship, Tmux, Termux, Lazygit, Neovim, Chromium, X11, Wayland (SwayFX/Sway/LabWC), & Quickshell configs
 └── .github/workflows/ # CI validation & aarch64-linux-android Rust cross-compilation
 ```
 
@@ -45,7 +45,7 @@ Installs the packages:
 | Editor | `neovim`, `lua55`, `luarocks`, `lua-language-server`, `tree-sitter`, `dotnet-sdk-9.0` + `csharp-ls`, `nodejs` + `basedpyright`, `ruff`, `ripgrep`, `fd`, `fzf`, `lazygit` |
 | Shell & CLI | `zsh`, `starship`, `git`, `zip`, `eza`, `yazi`, `zoxide`, `bat`, `glow`, `tmux`, `man`, `manpages`, `fastfetch`, `termux-api`, `rish-shizuku` |
 | GitHub | `git`, `git-delta`, `openssh`, `gh` |
-| **x11** *(optional in `setup.py`)* | `x11-repo`, `tur-repo`, `clang`, `libx11`, `libxi`, `libxfixes`, `dbus`, `pulseaudio`, `termux-api`, `rish-shizuku`, `termux-x11-nightly`, `quickshell`, `bspwm`, `polybar`, `rofi`, `sxhkd`, `fastcompmgr`, `sway`, `swaybg`, `labwc`, `foot`, `feh`, `xfce4-terminal`, `alacritty`, `virglrenderer-android`, `xorg-xcursorgen`, `xorg-xsetroot` |
+| **x11** *(optional in `setup.py`)* | `x11-repo`, `tur-repo`, `clang`, `libx11`, `libxi`, `libxfixes`, `dbus`, `pulseaudio`, `termux-api`, `rish-shizuku`, `termux-x11-nightly`, `quickshell`, `bspwm`, `polybar`, `rofi`, `sxhkd`, `fastcompmgr`, `sway`, `swaybg`, `labwc`, `foot`, `feh`, `xfce4-terminal`, `alacritty`, `mesa`, `mesa-demos`, `vulkan-loader-generic`, `vulkan-tools`, `patchelf`, `virglrenderer-android`, `xorg-xcursorgen`, `xorg-xsetroot` |
 
 Then sets **zsh** as the default shell (only if zsh actually installed).
 
@@ -60,7 +60,9 @@ If a step fails, the script prints why, carries on, and lists every failed step 
 | **Font** | Installs JetBrainsMono Nerd Font (`~/.termux/font.ttf`), Catppuccin Mocha colors (`~/.termux/colors.properties`), and Termux app tweaks (`~/.termux/termux.properties`: `bell-character = ignore`, `hide-soft-keyboard-on-startup`, `volume-keys = volume`, `extra-keys = []`, `disable-hardware-keyboard-shortcuts = false`, `back-key=escape`) |
 | **Tmux** | Writes `~/.tmux.conf` (Catppuccin Mocha bar, mouse support, `Ctrl-a`/`Ctrl-b` prefix, `\|`/`-` splits, `Alt+Arrow` pane switching, `vi` copy mode with Android clipboard via `termux-clipboard-set`) |
 | **Git** | Configures `git-delta` side-by-side diffs with line numbers, `zdiff3` merge conflicts, and `diff.colorMoved` in `~/.gitconfig`, plus `delta` + Nerd Font icons in `~/.config/lazygit/config.yml` |
-| **x11** | Writes Catppuccin Mocha configs for X11 (`bspwm`, `sxhkd`, `polybar`, `quickshell` + QML `components/`, `fastcompmgr`, `rofi`, `xfce4-terminal`) and Wayland (`sway`, `labwc`, `foot`, `quickshell`), installs touch-scaled Chromium wrapper & flags (`~/.local/bin/chromium`, `~/.config/chromium-flags.conf`, `~/.local/share/applications/chromium.desktop`, override scale with `CHROMIUM_SCALE`), plus Firefox `user.js`, compiles `~/.local/bin/qs-native` (native C daemons & persistent `rish` media-control pipe) and `~/.local/lib/libtgui_fix.so` (`--tgui` orientation/color shim), installs `~/.local/bin/rish` + Quickshell helpers (`weather.py` — override location via `~/.config/quickshell/weather.json` or `WEATHER_*` env vars, `android_status.py`), builds `TouchDot-Mocha` cursor theme, and installs `~/start-x11.sh` (`desktop`) and `~/start-wayland.sh` (`desktop-wayland`) |
+| **x11** | Writes Catppuccin Mocha configs for X11 (`bspwm`, `sxhkd`, `polybar`, `quickshell` + QML `components/`, `fastcompmgr`, `rofi`, `xfce4-terminal`) and Wayland (`swayfx`, `sway`, `labwc`, `foot`, `quickshell`), installs touch-scaled Chromium wrapper & flags (`~/.local/bin/chromium`, `~/.config/chromium-flags.conf`, `~/.local/share/applications/chromium.desktop`, override scale with `CHROMIUM_SCALE`), plus Firefox `user.js`, compiles `~/.local/bin/qs-native` (native C daemons & persistent `rish` media-control pipe) and `~/.local/lib/libtgui_fix.so` (`--tgui` orientation/color shim), installs `~/.local/bin/rish` + Quickshell helpers (`weather.py`, `android_status.py`), builds `TouchDot-Mocha` cursor theme, and installs `~/start-x11.sh` (`desktop`) and `~/start-wayland.sh` (`desktop-wayland`) |
+| **PanVK** (`--panvk` / `--gpu`) | Installs Mali PanVK ICD + `$PREFIX/lib/panvk-wsi/` symlinks + `~/.local/bin/gpu` from [`daz-9/termux-swayfx-panvk`](https://github.com/daz-9/termux-swayfx-panvk) and adds PanVK ICD env exports to `~/.zshrc` and `~/.bashrc` |
+| **SwayFX** (`--swayfx`) | Downloads & verifies the prebuilt patched `wlroots 0.20.2` / `scenefx 0.5.0` / `swayfx 0.6.1` release from [`daz-9/termux-swayfx-panvk`](https://github.com/daz-9/termux-swayfx-panvk) into `~/.local` and deploys `~/.config/swayfx/config` & `desktop-wayland` |
 
 #### Custom `xmake` commands
 
@@ -94,9 +96,10 @@ Skip the menus by passing flags (case-insensitive, any number of them):
 ```sh
 python main.py --setup --configure
 python setup.py --core --x11
-python configure.py --zsh --font --tmux --git --astronvim     # also supports --neovim, --termux, --rish, --x11
+python configure.py --zsh --font --tmux --git --astronvim     # also supports --neovim, --termux, --rish, --x11, --panvk, --swayfx
 desktop                                                        # start X11 (bspwm + Quickshell/Polybar)
-desktop-wayland [sway|labwc] [--x11|--tgui] [--renderer=pixman|gles2|vulkan]
+desktop-wayland [swayfx|sway|labwc] [--x11|--tgui] [--renderer=pixman|gles2|vulkan]
+gpu --check                                                    # verify PanVK Vulkan & Zink OpenGL
 ```
 
 ---

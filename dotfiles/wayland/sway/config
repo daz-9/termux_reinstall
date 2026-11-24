@@ -5,14 +5,14 @@ xwayland enable
 font pango:JetBrainsMono Nerd Font 14
 
 gaps inner 12
-gaps outer 8
+gaps outer 0
 default_border pixel 2
 default_floating_border pixel 2
-hide_edge_borders smart
+hide_edge_borders none
 
-# Catppuccin Mocha borders
-client.focused          #89b4fa #1e1e2e #cdd6f4 #cba6f7 #89b4fa
-client.focused_inactive #45475a #1e1e2e #a6adc8 #45475a #45475a
+# Catppuccin Mocha borders (matching Quickshell left bar: 2px #313244)
+client.focused          #313244 #1e1e2e #cdd6f4 #cba6f7 #313244
+client.focused_inactive #313244 #1e1e2e #a6adc8 #313244 #313244
 client.unfocused        #313244 #1e1e2e #a6adc8 #313244 #313244
 client.urgent           #f38ba8 #1e1e2e #cdd6f4 #f38ba8 #f38ba8
 
@@ -46,7 +46,9 @@ bindsym $mod+Shift+j move down
 bindsym $mod+Shift+k move up
 bindsym $mod+Shift+l move right
 
-# Layout
+# Layout & Split Direction
+bindsym $mod+b splith
+bindsym $mod+v splitv
 bindsym $mod+t layout tabbed
 bindsym $mod+e layout toggle split
 bindsym $mod+w layout stacking

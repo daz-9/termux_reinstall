@@ -6,9 +6,15 @@ export XCURSOR_THEME="${XCURSOR_THEME:-TouchDot-Mocha}"
 export XCURSOR_SIZE="${XCURSOR_SIZE:-32}"
 export XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-${TMPDIR:-/data/data/com.termux/files/usr/tmp}}"
 
+# Quickshell renders in software; don't make it load Zink/PanVK (inherited from the
+# swayfx GPU environment), which only slows down its startup.
+unset GALLIUM_DRIVER VK_DRIVER_FILES VK_ICD_FILENAMES WLR_GLES2_NO_DMABUF LD_LIBRARY_PATH \
+  QSG_RHI_BACKEND QSG_RENDER_LOOP
+
 # Match nested wlroots X11-1 window to the full outer Termux:X11 display size
+# (runs in the background so it never delays Quickshell startup)
 if [ "${WLR_BACKENDS:-x11}" = "x11" ]; then
-  python3 - <<'PY' >/dev/null 2>&1 || true
+  python3 - <<'PY' >/dev/null 2>&1 &
 import os, subprocess
 from ctypes import CDLL, POINTER, Structure, byref, c_int, c_long, c_uint, c_ulong, c_void_p
 

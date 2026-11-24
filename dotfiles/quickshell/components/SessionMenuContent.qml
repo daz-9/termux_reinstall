@@ -12,15 +12,13 @@ Item {
     Rectangle {
         width: parent.width
         height: 330
-        y: menuRoot.open ? 0 : 28
-        opacity: menuRoot.open ? 1.0 : 0.0
+        y: menuRoot.open ? 0 : parent.height
         radius: 22
         color: Theme.colPopupBase
         border.color: Theme.colSurface1
         border.width: 2
 
-        Behavior on y { NumberAnimation { duration: 160; easing.type: Easing.OutCubic } }
-        Behavior on opacity { NumberAnimation { duration: 130 } }
+        Behavior on y { NumberAnimation { duration: 140; easing.type: Easing.OutCubic } }
 
         Column {
             anchors.fill: parent

@@ -59,20 +59,40 @@ Scope {
     property string calMonthTitle: monthNames[calViewMonth] + " " + calViewYear
     property string calSelectedDateKey: ""
     property var calGridCells: []
+    property string _calGridSig: ""
+    property real _lastAndroidMs: 0
     property bool calendarOk: false
     property var agendaEvents: []
 
+    Timer {
+        id: openRefreshTimer
+        interval: 210
+        repeat: false
+        onTriggered: {
+            if (!hub.widgetsOpen) return;
+            hub.refreshAndroidStatusIfStale();
+            hub.refreshMedia();
+            hub.refreshFocus();
+            hub.rebuildCalendarGrid(false);
+            hub.queryCalendarMonth(hub.calViewYear, hub.calViewMonth);
+            hub.refreshWeatherIfStale();
+        }
+    }
+
     function onWidgetsOpened() {
-        hub.refreshAndroidStatus();
-        hub.refreshMedia();
-        hub.refreshFocus();
-        hub.rebuildCalendarGrid();
-        hub.queryCalendarMonth(hub.calViewYear, hub.calViewMonth);
-        hub.refreshWeatherIfStale();
+        openRefreshTimer.restart();
+    }
+
+    function refreshAndroidStatusIfStale() {
+        const now = Date.now();
+        if (hub._lastAndroidMs === 0 || (now - hub._lastAndroidMs) > 60000) {
+            hub.refreshAndroidStatus();
+        }
     }
 
     function refreshAndroidStatus() {
         if (!androidStatusProc.running) {
+            hub._lastAndroidMs = Date.now();
             hub.androidProbing = true;
             androidStatusProc.running = true;
         }
@@ -165,7 +185,7 @@ Scope {
         } else if (kind === "calendar") {
             if (d.ok !== undefined) hub.calendarOk = Boolean(d.ok);
             if (Array.isArray(d.events)) hub.agendaEvents = d.events;
-            hub.rebuildCalendarGrid();
+            hub.rebuildCalendarGrid(true);
         }
     }
 
@@ -209,19 +229,24 @@ Scope {
         return dateKey(p.y, p.m, p.d);
     }
 
-    function rebuildCalendarGrid() {
+    function rebuildCalendarGrid(force) {
         const y = hub.calViewYear;
         const m = hub.calViewMonth;
+        const now = new Date();
+        const todayKey = dateKey(now.getFullYear(), now.getMonth(), now.getDate());
+        const evs = hub.agendaEvents || [];
+        const sig = y + ":" + m + ":" + todayKey + ":" + evs.length;
+        if (!force && hub._calGridSig === sig && hub.calGridCells.length > 0) {
+            return;
+        }
+        hub._calGridSig = sig;
         hub.calMonthTitle = hub.monthNames[m] + " " + y;
 
         const eventMap = {};
-        const evs = hub.agendaEvents || [];
         for (let i = 0; i < evs.length; i++) {
             eventMap[eventDateKey(evs[i])] = true;
         }
 
-        const now = new Date();
-        const todayKey = dateKey(now.getFullYear(), now.getMonth(), now.getDate());
         const first = new Date(y, m, 1);
         const startOffset = (first.getDay() + 6) % 7; // Monday = 0
         const daysInMonth = new Date(y, m + 1, 0).getDate();
@@ -325,7 +350,7 @@ Scope {
         return Theme.colPeach;
     }
 
-    Component.onCompleted: hub.rebuildCalendarGrid()
+    Component.onCompleted: hub.rebuildCalendarGrid(true)
 
     Process {
         id: androidStatusProc

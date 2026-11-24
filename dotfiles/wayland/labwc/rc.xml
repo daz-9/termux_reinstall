@@ -19,7 +19,7 @@
   </desktops>
   <theme>
     <name>Catppuccin-Mocha</name>
-    <cornerRadius>16</cornerRadius>
+    <cornerRadius>24</cornerRadius>
     <font name="JetBrainsMono Nerd Font" size="13" />
   </theme>
   <focus>

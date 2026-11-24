@@ -17,6 +17,7 @@ failures: list[str] = []
 HERE = os.path.dirname(os.path.abspath(__file__))
 
 WALLPAPER_URL = "https://raw.githubusercontent.com/Ahwxorg/Wallpapers/main/aenami/alena-aenami-eternity-1080px.jpg"
+SWAYFX_PANVK_RAW = "https://raw.githubusercontent.com/daz-9/termux-swayfx-panvk/main"
 
 
 # --- Helpers -----------------------------------------------------------------
@@ -102,7 +103,7 @@ def main() -> int:
     from simple_term_menu import TerminalMenu
 
     terminal_menu = TerminalMenu(
-        ["Zsh", "Neovim", "Font", "Tmux", "Git", "x11"],
+        ["Zsh", "Neovim", "Font", "Tmux", "Git", "x11", "PanVK", "SwayFX"],
         multi_select=True,
         show_multi_select_hint=True,
         title="Select what to configure (use space to select, enter to confirm):",
@@ -149,6 +150,9 @@ def dispatch(choices: tuple[str, ...]) -> int:
         "git": lambda: configure_git(),
         "x11": lambda: configure_x11(),
         "rish": lambda: configure_rish(),
+        "panvk": lambda: configure_panvk(),
+        "gpu": lambda: configure_panvk(),
+        "swayfx": lambda: configure_swayfx(),
     })
 
 
@@ -232,21 +236,46 @@ fi
 # <<< starship prompt <<<
 """
 
+PANVK_ENV_MARKER = "# >>> panvk hardware acceleration >>>"
+PANVK_ENV_ZSH = f"""
+{PANVK_ENV_MARKER}
+# Override oh-my-zsh git plugin's `gpu` alias so ~/.local/bin/gpu is used
+unalias gpu 2>/dev/null
+if [ -f "${{PREFIX:-/data/data/com.termux/files/usr}}/share/vulkan/icd.d/panfrost_icd.aarch64.json" ]; then
+  export VK_DRIVER_FILES="${{PREFIX:-/data/data/com.termux/files/usr}}/share/vulkan/icd.d/panfrost_icd.aarch64.json"
+  export VK_ICD_FILENAMES="$VK_DRIVER_FILES"
+fi
+# <<< panvk hardware acceleration <<<
+"""
+PANVK_ENV_BASH = f"""
+{PANVK_ENV_MARKER}
+if [ -f "${{PREFIX:-/data/data/com.termux/files/usr}}/share/vulkan/icd.d/panfrost_icd.aarch64.json" ]; then
+  export VK_DRIVER_FILES="${{PREFIX:-/data/data/com.termux/files/usr}}/share/vulkan/icd.d/panfrost_icd.aarch64.json"
+  export VK_ICD_FILENAMES="$VK_DRIVER_FILES"
+fi
+# <<< panvk hardware acceleration <<<
+"""
+
+
+def _append_rc_block(rc_raw: str, marker: str, block: str, label: str):
+    """Append a marked config block to a shell rc file once (re-running doesn't duplicate it)."""
+    rc_path = os.path.expanduser(rc_raw)
+    try:
+        existing = open(rc_path).read() if os.path.exists(rc_path) else ""
+        if marker in existing:
+            print(f"[+] {label} already in {rc_raw}")
+            return
+        with open(rc_path, "a") as f:
+            f.write(block)
+        print(f"[+] added {label} to {rc_raw}")
+    except OSError as e:
+        print(f"[-] adding {label} to {rc_raw} failed: {e}")
+        failures.append(f"adding {label} to {rc_raw}")
+
 
 def _append_zshrc_block(marker: str, block: str, label: str):
     """Append a marked config block to ~/.zshrc once (re-running doesn't duplicate it)."""
-    zshrc = os.path.expanduser("~/.zshrc")
-    try:
-        existing = open(zshrc).read() if os.path.exists(zshrc) else ""
-        if marker in existing:
-            print(f"[+] {label} already in ~/.zshrc")
-            return
-        with open(zshrc, "a") as f:
-            f.write(block)
-        print(f"[+] added {label} to ~/.zshrc")
-    except OSError as e:
-        print(f"[-] adding {label} failed: {e}")
-        failures.append(f"adding zsh {label}")
+    _append_rc_block("~/.zshrc", marker, block, label)
 
 
 def install_zsh_plugins(omz_dir: str) -> list[str]:
@@ -320,6 +349,7 @@ def configure_zsh() -> int:
     _append_zshrc_block(ZSH_CLI_TOOLS_MARKER, ZSH_CLI_TOOLS, "CLI tools (zoxide, fzf, bat)")
     configure_starship()
     _append_zshrc_block(ZSH_STARSHIP_MARKER, ZSH_STARSHIP, "starship prompt")
+    _append_zshrc_block(PANVK_ENV_MARKER, PANVK_ENV_ZSH, "panvk hardware acceleration")
     configure_rish()
     return 0
 
@@ -654,6 +684,37 @@ def _install_dir_assets(src_parts: tuple[str, ...], dest_dir_raw: str, mode: int
             _install_asset((*src_parts, name), f"{dest_dir_raw.rstrip('/')}/{name}", mode)
 
 
+def configure_panvk() -> int:
+    """Install PanVK Vulkan ICD + WSI symlinks and gpu wrapper from daz-9/termux-swayfx-panvk."""
+    ok = run(
+        f"curl -fsSL '{SWAYFX_PANVK_RAW}/scripts/install-panvk.sh' | bash",
+        "installing PanVK Vulkan ICD and WSI symlinks",
+    )
+    gpu_dest = os.path.expanduser("~/.local/bin/gpu")
+    os.makedirs(os.path.dirname(gpu_dest), exist_ok=True)
+    ok = run(
+        f"curl -fsSL '{SWAYFX_PANVK_RAW}/bin/gpu' -o '{gpu_dest}.tmp' && chmod 0755 '{gpu_dest}.tmp' && mv '{gpu_dest}.tmp' '{gpu_dest}'",
+        "installing ~/.local/bin/gpu",
+    ) and ok
+    _append_rc_block("~/.zshrc", PANVK_ENV_MARKER, PANVK_ENV_ZSH, "panvk hardware acceleration")
+    _append_rc_block("~/.bashrc", PANVK_ENV_MARKER, PANVK_ENV_BASH, "panvk hardware acceleration")
+    return 0 if ok else 1
+
+
+def configure_swayfx() -> int:
+    """Install prebuilt patched wlroots/scenefx/swayfx release from daz-9/termux-swayfx-panvk and deploy config."""
+    ok = run(
+        f"curl -fsSL '{SWAYFX_PANVK_RAW}/scripts/install-release.sh' | bash",
+        "installing prebuilt SwayFX/SceneFX/wlroots release",
+    )
+    prefix = os.environ.get("PREFIX", "/data/data/com.termux/files/usr")
+    prefix_bin = os.path.join(prefix, "bin")
+    ok = _install_asset(("dotfiles", "wayland", "swayfx", "config"), "~/.config/swayfx/config", 0o644) and ok
+    ok = _install_asset(("dotfiles", "wayland", "start-wayland.sh"), "~/start-wayland.sh", 0o755) and ok
+    ok = _install_asset(("dotfiles", "wayland", "start-wayland.sh"), os.path.join(prefix_bin, "desktop-wayland"), 0o755) and ok
+    return 0 if ok else 1
+
+
 def configure_x11() -> int:
     """Build native daemons/cursors/shims and deploy X11, Wayland, and Quickshell configs."""
     wall_dir = os.path.expanduser("~/.local/share/wallpapers")
@@ -686,6 +747,7 @@ def configure_x11() -> int:
         (("daemons", "scripts", "quickshell", "android_status.py"), "~/.config/quickshell/scripts/android_status.py", 0o755),
         (("daemons", "scripts", "quickshell", "weather.py"), "~/.config/quickshell/scripts/weather.py", 0o755),
         (("dotfiles", "wayland", "sway", "config"), "~/.config/sway/config", 0o644),
+        (("dotfiles", "wayland", "swayfx", "config"), "~/.config/swayfx/config", 0o644),
         (("dotfiles", "wayland", "labwc", "rc.xml"), "~/.config/labwc/rc.xml", 0o644),
         (("dotfiles", "wayland", "labwc", "themerc"), "~/.config/labwc/themerc", 0o644),
         (("dotfiles", "wayland", "labwc", "autostart"), "~/.config/labwc/autostart", 0o755),
@@ -693,6 +755,7 @@ def configure_x11() -> int:
         (("dotfiles", "x11", "rofi", "config.rasi"), "~/.config/rofi/config.rasi", 0o644),
         (("dotfiles", "x11", "xfce4", "terminalrc"), "~/.config/xfce4/terminal/terminalrc", 0o644),
         (("dotfiles", "x11", "xfce4", "xfce4-terminal.xml"), "~/.config/xfce4/xfconf/xfce-perchannel-xml/xfce4-terminal.xml", 0o644),
+        (("dotfiles", "x11", "gtk-3.0", "gtk.css"), "~/.config/gtk-3.0/gtk.css", 0o644),
         (("dotfiles", "x11", "chromium", "chromium-flags.conf"), "~/.config/chromium-flags.conf", 0o644),
         (("dotfiles", "x11", "chromium", "chromium.desktop"), "~/.local/share/applications/chromium.desktop", 0o644),
         (("dotfiles", "x11", "chromium-default.conf"), os.path.join(prefix, "etc", "chromium", "default.conf"), 0o644),
